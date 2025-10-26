@@ -53,7 +53,7 @@ func NewPubSubService(ctx context.Context, node *core.IpfsNode, topicName string
         sub:    sub,
         ctx:    ctx,
         peerID: node.Identity.String(),
-		LEADER: os.Getenv("LEADER") == "1",
+		Leader: os.Getenv("LEADER") == "1",
     }
 
 	if service.Leader {
