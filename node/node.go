@@ -6,7 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
+	
 
 	"github.com/ipfs/kubo/config"
 	"github.com/ipfs/kubo/core"
@@ -20,6 +20,7 @@ import (
 
 
 func createRepo(repoPath string) bool {
+	
 	_, err := os.Stat(repoPath)
 	if err == nil {
 		return true
@@ -55,7 +56,6 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 	repo, err := fsrepo.Open(repoPath)
 
-
 	if err != nil {
 		if !createRepo(repoPath) {
 			return nil, fmt.Errorf("failed to create repo")
@@ -83,7 +83,7 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 func main() {
 
-	repoPath := "/home/tiago/.ipfs";
+	repoPath := "C:\\Users\\bento\\.ipfs";
 
 	plugins, err := loader.NewPluginLoader(repoPath)
 	if err != nil {
@@ -98,18 +98,17 @@ func main() {
 		panic(fmt.Errorf("error initializing plugins: %s", err))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := context.Background()
+    
+    node, err := createNode(ctx, repoPath)
+    if err != nil {
+        log.Fatalf("Error creating IPFS node: %v", err)
+    } 
 
-	node, err := createNode(ctx, repoPath)
-
+	ipfsService, err := coreapi.NewCoreAPI(node)
 	if err != nil {
-		log.Fatalf("Error creating IPFS node: %v", err)
-	} 
-
-
-	ipfsService,err := coreapi.NewCoreAPI(node)
-
+		log.Fatalf("Error creating IPFS CoreAPI: %v", err)
+	}
 
 	// outputPath := "randomFile.txt"
 	//
