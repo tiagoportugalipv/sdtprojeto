@@ -15,6 +15,7 @@ import (
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo/fsrepo"
 	"sdt/node/api"
+	"sdt/node/services/messaging"
 
 )
 
@@ -119,6 +120,11 @@ func main() {
 
 	fmt.Println("IPFS Node created successfully: "+node.Identity.String())
 
-	api.Initialize(ctx, ipfsService)
+	PubSubService, err := messaging.NewPubSubService(ctx, node, "Uploaded-Files-Topic")
+	if err != nil {
+		log.Fatalf("Error creating PubSub service: %v", err)
+	}
+
+	api.Initialize(ctx, ipfsService, PubSubService)
 }
 

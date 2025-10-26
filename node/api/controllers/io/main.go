@@ -5,16 +5,17 @@ import (
 	"net/http"
     "io"
     "time"
+    "log"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ipfs/boxo/files"
 	iface "github.com/ipfs/kubo/core/coreiface"
+	"sdt/node/services/messaging"
 )
 
-func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI){
+func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, PubSubService *messaging.PubSubService) {
 
     file, err := ctx.FormFile("file")
-    
     if err != nil || file == nil {
         ctx.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
         return
@@ -42,10 +43,15 @@ func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI){
         return
     }
 
+    message := "New file uploaded: " + file.Filename + " (CID: " + peerCidFile.String() + ")"
+    err = PubSubService.PublishMessage(message)
+    if err != nil {
+        log.Printf("Failed to publish upload notification: %v", err)
+    }
+
     ctx.JSON(http.StatusOK, gin.H{
         "message": "File added successfully, CID : "+peerCidFile.String(),
         "filename": file.Filename,
         "cid": peerCidFile.String(),
     })
 }
-
