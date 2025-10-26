@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	
 
 	"github.com/ipfs/kubo/config"
 	"github.com/ipfs/kubo/core"
@@ -16,7 +15,6 @@ import (
 	"github.com/ipfs/kubo/repo/fsrepo"
 	"sdt/node/api"
 	"sdt/node/services/messaging"
-
 )
 
 
@@ -83,8 +81,7 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 
 func main() {
-
-	repoPath := "C:\\Users\\bento\\.ipfs";
+	repoPath := "C:\\Users\\bento\\.ipfs"
 
 	plugins, err := loader.NewPluginLoader(repoPath)
 	if err != nil {
@@ -125,6 +122,12 @@ func main() {
 		log.Fatalf("Error creating PubSub service: %v", err)
 	}
 
+
+	if os.Getenv("LEADER") == "1" {
+		if err := pubSubService.PublishMessage("Líder online: " + node.Identity.String()); err != nil {
+			log.Printf("Falha ao publicar mensagem do líder: %v", err)
+		}
+	}
+
 	api.Initialize(ctx, ipfsService, pubSubService)
 }
-
