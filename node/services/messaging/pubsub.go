@@ -5,7 +5,6 @@ import (
     "encoding/json"
     "log"
     "net/http"
-    "time"
 
     "github.com/gin-gonic/gin"
     pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -30,6 +29,7 @@ type SendMessageReq struct {
 }
 
 func NewPubSubService(ctx context.Context, node *core.IpfsNode, topicName string) (*PubSubService, error) {
+
     ps, err := pubsub.NewGossipSub(ctx, node.PeerHost)
     if err != nil {
         return nil, err
@@ -54,23 +54,8 @@ func NewPubSubService(ctx context.Context, node *core.IpfsNode, topicName string
     }
 
     go service.listenMessages()
-    go service.monitorTopicPeers()
 
     return service, nil
-}
-
-func (s *PubSubService) monitorTopicPeers() {
-    ticker := time.NewTicker(5 * time.Second)
-    defer ticker.Stop()
-    
-    for range ticker.C {
-        peers := s.topic.ListPeers()
-        if len(peers) > 0 {
-            log.Printf("✓ PubSub peers connected: %d", len(peers))
-        } else {
-            log.Println("⏳ Waiting for PubSub peers...")
-        }
-    }
 }
 
 func (s *PubSubService) listenMessages() {
