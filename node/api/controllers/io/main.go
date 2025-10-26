@@ -13,7 +13,7 @@ import (
 	"sdt/node/services/messaging"
 )
 
-func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, PubSubService *messaging.PubSubService) {
+func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, pubSubService *messaging.PubSubService) {
 
     file, err := ctx.FormFile("file")
     if err != nil || file == nil {
@@ -44,7 +44,7 @@ func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, P
     }
 
     message := "New file uploaded: " + file.Filename + " (CID: " + peerCidFile.String() + ")"
-    err = PubSubService.PublishMessage(message)
+    err = pubSubService.PublishMessage(message)
     if err != nil {
         log.Printf("Failed to publish upload notification: %v", err)
     }

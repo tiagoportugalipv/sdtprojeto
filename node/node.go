@@ -120,11 +120,11 @@ func main() {
 
 	fmt.Println("IPFS Node created successfully: "+node.Identity.String())
 
-	PubSubService, err := messaging.NewPubSubService(ctx, node, "Uploaded-Files-Topic")
+	pubSubService, err := messaging.NewPubSubService(ctx, node, "Uploaded-Files-Topic")
 	if err != nil {
 		log.Fatalf("Error creating PubSub service: %v", err)
 	}
 
-	api.Initialize(ctx, ipfsService, PubSubService)
+	api.Initialize(ctx, ipfsService, pubSubService)
 }
 
