@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
     "io"
+    "time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ipfs/boxo/files"
@@ -32,7 +33,10 @@ func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI){
         return
     }
 
-    peerCidFile, err := ipfs.Unixfs().Add(nodeCtx,files.NewBytesFile(fileBytes))
+    uploadCtx, cancel := context.WithTimeout(nodeCtx, 30*time.Second)
+    defer cancel()
+
+    peerCidFile, err := ipfs.Unixfs().Add(uploadCtx, files.NewBytesFile(fileBytes))
     if err != nil {
         ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add file to IPFS: " + err.Error()})
         return
