@@ -81,7 +81,7 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 
 func main() {
-	repoPath := "C:\\Users\\bento\\.ipfs"
+	repoPath := "C:\\Users\\admin\\.ipfs"
 
 	plugins, err := loader.NewPluginLoader(repoPath)
 	if err != nil {
@@ -130,6 +130,5 @@ func main() {
 			log.Printf("Falha ao publicar mensagem do líder: %v", err)
 		}
 	}
-
 	api.Initialize(ctx, ipfsService, pubSubService)
 }
