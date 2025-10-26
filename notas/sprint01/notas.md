@@ -127,22 +127,28 @@ ipfs swarm peers
 
 e obtemos todos os endereços dos peers conhecidos na rede.
 
-## Utilização basica
+## Utilização
 
-Para utilizar o ipfs podemos adicionar um ficheiro ao sistema num peer
-
+Para utilizar o ipfs podemos adicionar um ficheiro ao sistema num peer.
+Neste cenário, o peer 1 envia um ficheiro através do seguinte comando:
 ```bash
-ipfs add randomFile.md
+ipfs add ./path/randomFile.md
+```
+Após o envio, o peer um envia o CID retornado na linha de comandos, após adicionar o ficheiro.
+
+
+O peer 2, recebe o CID do ficheiro, e de seguida, através do seguinte comando consegue visualizar o ficheiro enviado pelo peer 1:
+```bash
+ipfs get CID
 ```
 
-e depois noutro peer ir obter os conteudos desse ficheiro
+**Exemplo:**
 
-```bash
-ipfs cat CID
-```
+Peer 1:
+![peer1](./assets/addFile.png)
 
-![exemplo](./assets/ipfsTest.png)
-
+Peer 2:
+![peer2](./assets/getCID.png)
 
 
 
