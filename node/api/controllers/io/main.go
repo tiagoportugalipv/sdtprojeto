@@ -1,20 +1,19 @@
 package controllers
 
 import (
-	"context"
-	"net/http"
+    "context"
+    "net/http"
     "io"
     "time"
     "log"
 
-	"github.com/gin-gonic/gin"
-	"github.com/ipfs/boxo/files"
-	iface "github.com/ipfs/kubo/core/coreiface"
-	"sdt/node/services/messaging"
+    "github.com/gin-gonic/gin"
+    "github.com/ipfs/boxo/files"
+    iface "github.com/ipfs/kubo/core/coreiface"
+    "sdt/node/services/messaging"
 )
 
 func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, pubSubService *messaging.PubSubService) {
-
     file, err := ctx.FormFile("file")
     if err != nil || file == nil {
         ctx.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
@@ -50,8 +49,8 @@ func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, p
     }
 
     ctx.JSON(http.StatusOK, gin.H{
-        "message": "File added successfully, CID : "+peerCidFile.String(),
+        "message":  "File added successfully, CID : " + peerCidFile.String(),
         "filename": file.Filename,
-        "cid": peerCidFile.String(),
+        "cid":      peerCidFile.String(),
     })
 }
