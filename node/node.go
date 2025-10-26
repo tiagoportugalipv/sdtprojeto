@@ -20,7 +20,7 @@ import (
 
 
 func createRepo(repoPath string) bool {
-	
+
 	_, err := os.Stat(repoPath)
 	if err == nil {
 		return true
@@ -120,7 +120,5 @@ func main() {
 	fmt.Println("IPFS Node created successfully: "+node.Identity.String())
 
 	api.Initialize(ctx, ipfsService)
-
-	
 }
 
