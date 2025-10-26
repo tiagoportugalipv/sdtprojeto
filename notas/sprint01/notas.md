@@ -126,7 +126,7 @@ ipfs swarm peers
 
 e obtemos todos os endereços dos peers conhecidos na rede.
 
-## Utilização basica
+## Utilização
 
 Para utilizar o ipfs podemos adicionar um ficheiro ao sistema num peer.
 Neste cenário, o peer 1 envia um ficheiro através do seguinte comando:
@@ -141,7 +141,13 @@ O peer 2, recebe o CID do ficheiro, e de seguida, através do seguinte comando c
 ipfs get CID
 ```
 
+**Exemplo:**
 
+Peer 1:
+![peer1](./assets/addFile.png)
+
+Peer 2:
+![peer2](./assets/getCID.png)
 
 
 
