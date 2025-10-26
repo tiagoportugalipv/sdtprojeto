@@ -71,6 +71,7 @@ ipfs config show
 
 ```bash
 ipfs config --json Addresses.Announce '["/ip4/$IPDONÓ/tcp/4001"]'
+ipfs config --json AutoConf.Enabled false
 ```
 
 onde IPDONÓ é o ipv4 que pode ser obtido com `ip addr`
