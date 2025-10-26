@@ -5,6 +5,7 @@ import (
     "encoding/json"
     "log"
     "net/http"
+	"os"
 
     "github.com/gin-gonic/gin"
     pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -22,6 +23,7 @@ type PubSubService struct {
     sub     *pubsub.Subscription
     ctx     context.Context
     peerID  string
+	Leader  bool
 }
 
 type SendMessageReq struct {
@@ -51,7 +53,12 @@ func NewPubSubService(ctx context.Context, node *core.IpfsNode, topicName string
         sub:    sub,
         ctx:    ctx,
         peerID: node.Identity.String(),
+		LEADER: os.Getenv("LEADER") == "1",
     }
+
+	if service.Leader {
+    	_ = service.PublishMessage("Líder online: " + service.peerID)
+	}
 
     go service.listenMessages()
 
@@ -65,6 +72,8 @@ func (s *PubSubService) listenMessages() {
             log.Printf("Error receiving message: %v", err)
             continue
         }
+
+        log.Printf("DBG ReceivedFrom=%s self=%s", msg.ReceivedFrom.String(), s.peerID)
 
         if msg.ReceivedFrom.String() == s.peerID {
             continue

@@ -117,11 +117,13 @@ func main() {
 
 	fmt.Println("IPFS Node created successfully: "+node.Identity.String())
 
-	pubSubService, err := messaging.NewPubSubService(ctx, node, "Uploaded-Files-Topic")
+	pubSubService, err := messaging.NewPubSubService(ctx, node, "uploaded")
+
 	if err != nil {
 		log.Fatalf("Error creating PubSub service: %v", err)
 	}
 
+	log.Printf("Subscribed to topic: %s as %s", "Uploaded-Files-Topic", node.Identity.String())
 
 	if os.Getenv("LEADER") == "1" {
 		if err := pubSubService.PublishMessage("Líder online: " + node.Identity.String()); err != nil {

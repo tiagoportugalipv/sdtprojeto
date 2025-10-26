@@ -44,9 +44,10 @@ func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, p
     }
 
     message := "New file uploaded: " + file.Filename + " (CID: " + peerCidFile.String() + ")"
-    err = pubSubService.PublishMessage(message)
-    if err != nil {
-        log.Printf("Failed to publish upload notification: %v", err)
+    if err := pubSubService.PublishMessage(message); err != nil {
+    log.Printf("Failed to publish upload notification: %v", err)
+    } else {
+    log.Printf("Published upload notice to topic")
     }
 
     ctx.JSON(http.StatusOK, gin.H{
