@@ -26,29 +26,39 @@ import (
 // Devolve true em caso de sucesso (existente ou criado) e false se falhar.
 func createRepo(repoPath string) bool {
 
+	//Ignora o primeiro valor devolvido e de seguida verifica se o ficheiro existe
 	_, err := os.Stat(repoPath)
+
+	//Se existe ficheiro
 	if err == nil {
 		return true
 	}
 
+	//true quando o erro é outro tipo de erro
 	if !os.IsNotExist(err) {
 		log.Printf("Failed to check repo directory: %v", err)
 		return false
 	}
 
+	//Tenta criar o diretório, Se der erro, mostra uma mensagem no log e devolve falso
 	err = os.Mkdir(repoPath, 0750)
+	//Se der erro
 	if err != nil {
 		log.Printf("Failed to create repo directory: %v", err)
 		return false
 	}
 
-	cfg, err := config.Init(io.Discard, 2048) // configuração inicial do repo
+	//Tenta criar a configuração do repositório.
+	cfg, err := config.Init(io.Discard, 2048)
+	//Se der erro
 	if err != nil {
 		log.Printf("Failed to create repo config: %v", err)
 		return false
 	}
 
-	err = fsrepo.Init(repoPath, cfg) // inicializa o repositório no disco
+	//inicializa o repositório no caminho repoPath usando a configuração cfg.
+	//Cria a estrutura do repositório no disco	
+	err = fsrepo.Init(repoPath, cfg)
 	if err != nil {
 		log.Printf("Failed to initialize repo: %v", err)
 		return false
@@ -57,27 +67,35 @@ func createRepo(repoPath string) bool {
 	return true
 }
 
-// createNode abre (ou cria) o repositório e instancia um nó IPFS online.
+//Esta função serve para criar um nó IPFS a partir de um repositório existente
 func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
+	//Tenta abrir o repositório IPFS que está na pasta repoPath
 	repo, err := fsrepo.Open(repoPath)
 
+	//Se houver erro
 	if err != nil {
+
+		//Se não for criado o repositório
 		if !createRepo(repoPath) {
 			return nil, fmt.Errorf("failed to create repo")
 		}
+		//Tenta abrir o repositório que esta na pasta repoPath
 		repo, err = fsrepo.Open(repoPath)
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to open repo after creation: %v", err)
 		}
 	}
 
-	nodeOptions := &core.BuildCfg{ // configuração do nó IPFS
-		Online: true,               // opera em modo online
-		Routing: libp2p.DHTOption,  // usa DHT para descoberta/roteamento
-		Repo: repo,                 // repositório associado
+	//Prepara todas as definições que o nó IPFS precisa antes de ser criado
+	nodeOptions := &core.BuildCfg{
+		Online: true,
+		Routing: libp2p.DHTOption,
+		Repo: repo,
 	}
 
+	//Cria o nó IPFS com as opções definidas anteriomente
 	node, err := core.NewNode(ctx, nodeOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create IPFS node: %v", err)
@@ -115,10 +133,11 @@ func enableMdnsDiscovery(ctx context.Context, node *core.IpfsNode) error {
 
 // main: carrega plugins, cria o nó IPFS, inicializa Pub/Sub e API HTTP
 func main() {
-	repoPath := "C:\\Users\\bento\\.ipfs"
+	repoPath := "C:\\Users\\admin\\.ipfs"
 
 	plugins, err := loader.NewPluginLoader(repoPath) // gestor de plugins do IPFS
 	if err != nil {
+		//indica um erro e interrompe a execução do ficheiro
 		panic(fmt.Errorf("error loading plugins: %s", err))
 	}
 
@@ -127,6 +146,7 @@ func main() {
 	}
 
 	if err := plugins.Inject(); err != nil {
+		
 		panic(fmt.Errorf("error initializing plugins: %s", err))
 	}
 
