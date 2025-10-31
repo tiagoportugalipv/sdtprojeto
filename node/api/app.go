@@ -3,9 +3,10 @@ package api
 import (
 	"context"
 	fileRoutes "sdt/node/api/routes/io"
+	"sdt/node/services/messaging"
+
 	"github.com/gin-gonic/gin"
 	iface "github.com/ipfs/kubo/core/coreiface"
-  "sdt/node/services/messaging"
 )
 
 func Initialize( nodeCtx context.Context, ipfs iface.CoreAPI, pubSubService *messaging.PubSubService ){

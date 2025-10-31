@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -173,18 +174,38 @@ func main() {
 
 	fmt.Println("IPFS Node created successfully: "+node.Identity.String())
 
-	pubSubService, err := messaging.NewPubSubService(ctx, node, "uploaded") // serviço Pub/Sub
+	pubSubService, err := messaging.NewPubSubService(ctx, node, "batatas") // serviço Pub/Sub
 
 	if err != nil {
 		log.Fatalf("Error creating PubSub service: %v", err)
 	}
 
-	log.Printf("Subscribed to topic: %s as %s", "uploaded", node.Identity.String()) // confirmação
+	log.Printf("Subscribed to topic: %s as %s", "batatas", node.Identity.String()) // confirmação
 
 	// Publica uma mensagem de presença ao iniciar (ajuda a validar receção entre peers)
 	if err := pubSubService.PublishMessage("Node online: " + node.Identity.String()); err != nil {
 		log.Printf("Falha ao publicar mensagem de presença: %v", err)
 	}
+
+	// Loop de consola: cada linha escrita será publicada no tópico
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		fmt.Println("Type a message and press Enter to publish to 'batatas':")
+		for scanner.Scan() {
+			text := scanner.Text()
+			if text == "" {
+				continue
+			}
+			if err := pubSubService.PublishMessage(text); err != nil {
+				log.Printf("Failed to publish from console: %v", err)
+			} else {
+				log.Printf("Published from console: %s", text)
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("Console read error: %v", err)
+		}
+	}()
 	api.Initialize(ctx, ipfsService, pubSubService) // arranca a API HTTP (porta 9000)
 }
 
