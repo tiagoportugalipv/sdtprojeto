@@ -44,8 +44,7 @@ func UploadFile(ctx *gin.Context, nodeCtx context.Context, ipfs iface.CoreAPI, p
 
     //Envia o arquivo para o nó IPFS
     peerCidFile, err := ipfs.Unixfs().Add(uploadCtx, files.NewBytesFile(fileBytes))
-    if err != nil //Verifica se existe um erro ao adicionar o arquivo ao IPFS / nil == null 
-    {
+    if err != nil { //Verifica se existe um erro ao adicionar o arquivo ao IPFS / nil == null
         ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add file to IPFS: " + err.Error()})
         return
     }

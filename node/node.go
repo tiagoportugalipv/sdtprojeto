@@ -81,7 +81,7 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 
 func main() {
-	repoPath := "C:\\Users\\admin\\.ipfs"
+	repoPath := "C:\\Users\\bento\\.ipfs"
 
 	plugins, err := loader.NewPluginLoader(repoPath)
 	if err != nil {

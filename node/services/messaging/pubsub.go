@@ -75,14 +75,15 @@ func (s *PubSubService) listenMessages() {
 
         log.Printf("DBG ReceivedFrom=%s self=%s", msg.ReceivedFrom.String(), s.peerID)
 
-        if msg.ReceivedFrom.String() == s.peerID {
-            continue
-        }
-
         var message Message
         err = json.Unmarshal(msg.Data, &message)
         if err != nil {
             log.Printf("Error unmarshaling message: %v", err)
+            continue
+        }
+
+        // Ignora apenas mensagens que foram publicadas por este próprio peer
+        if message.From == s.peerID {
             continue
         }
 
