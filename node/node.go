@@ -18,7 +18,7 @@ import (
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo/fsrepo"
-	"github.com/libp2p/go-libp2p/core/peer"
+	libpeer "github.com/libp2p/go-libp2p/core/peer"
 	mdns "github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 )
 
@@ -112,7 +112,7 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 // notifeeMdns tenta ligar-se a peers descobertos via mDNS
 type notifeeMdns struct{ node *core.IpfsNode }
 
-func (n *notifeeMdns) HandlePeerFound(pi peer.AddrInfo) {
+func (n *notifeeMdns) HandlePeerFound(pi libpeer.AddrInfo) {
 	if pi.ID == n.node.Identity {
 		return
 	}
@@ -133,7 +133,7 @@ func enableMdnsDiscovery(ctx context.Context, node *core.IpfsNode) error {
 
 // main: carrega plugins, cria o nó IPFS, inicializa Pub/Sub e API HTTP
 func main() {
-	repoPath := "C:\\Users\\admin\\.ipfs"
+	repoPath := "C:\\Users\\bento\\.ipfs"
 
 	plugins, err := loader.NewPluginLoader(repoPath) // gestor de plugins do IPFS
 	if err != nil {
@@ -162,6 +162,8 @@ func main() {
 		log.Fatalf("Error creating IPFS CoreAPI: %v", err)
 	}
 
+    // Conexão a peers é automática via mDNS (LAN) e através da rede IPFS/libp2p padrão
+
 	// outputPath := "randomFile.txt"
 	//
 	// cidFicheiro,_ := cid.Decode("QmYaBU4DJyEZCntf2Pua2kdgnXDz7gntSzuUwxer4XgAX9")
@@ -185,3 +187,6 @@ func main() {
 	}
 	api.Initialize(ctx, ipfsService, pubSubService) // arranca a API HTTP (porta 9000)
 }
+
+// connectToPeers tenta ligar aos multiaddrs fornecidos usando a CoreAPI (Swarm.Connect)
+// ligação manual via variável de ambiente removida para manter descoberta automática

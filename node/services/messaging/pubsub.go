@@ -65,6 +65,9 @@ func NewPubSubService(ctx context.Context, node *core.IpfsNode, topicName string
         Leader: os.Getenv("LEADER") == "1",
     }
 
+    // Loga peers presentes no tópico no momento da adesão
+    service.logTopicPeers("OnJoin")
+
     // Se for líder, anuncia a presença no arranque
     if service.Leader {
         _ = service.PublishMessage("Líder online: " + service.peerID)
@@ -108,6 +111,8 @@ func (s *PubSubService) listenMessages() {
 
 // PublishMessage serializa e publica uma mensagem no tópico atual
 func (s *PubSubService) PublishMessage(content string) error {
+    // Antes de publicar, mostra quantos peers estão no tópico
+    s.logTopicPeers("OnPublish")
     msg := Message{
         From:    s.peerID,
         Content: content,
@@ -119,6 +124,20 @@ func (s *PubSubService) PublishMessage(content string) error {
     }
 
     return s.topic.Publish(s.ctx, msgBytes)
+}
+
+// logTopicPeers imprime o número de peers ligados ao tópico e os seus IDs
+func (s *PubSubService) logTopicPeers(prefix string) {
+    peerIDs := s.ps.ListPeers(s.topic.String())
+    if len(peerIDs) == 0 {
+        log.Printf("%s: 0 peers in topic %s", prefix, s.topic.String())
+        return
+    }
+    ids := make([]string, 0, len(peerIDs))
+    for _, p := range peerIDs {
+        ids = append(ids, p.String())
+    }
+    log.Printf("%s: %d peers in topic %s -> %v", prefix, len(peerIDs), s.topic.String(), ids)
 }
 
 // Close encerra a subscrição e fecha o tópico
