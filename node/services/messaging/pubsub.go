@@ -12,8 +12,8 @@ import (
 )
 
 type Message struct {
-	From    string `json:"from"`
-	Content string `json:"content"`
+	From    string   `json:"from"`
+	Content []string `json:"content"`
 }
 
 type PubSubService struct {
@@ -59,9 +59,9 @@ func NewPubSubService(ctx context.Context, node *core.IpfsNode, topicName string
 	}
 
 	// Se for líder, anuncia a presença no arranque
-	if service.Leader {
+	/*if service.Leader {
 		_ = service.PublishMessage("Líder online: " + service.peerID)
-	}
+	}*/
 
 	// Inicia a rotina de escuta de mensagens
 	go service.listenMessages()
@@ -79,20 +79,20 @@ func (s *PubSubService) listenMessages() {
 			continue
 		}
 
-        // Primeiro tenta interpretar como JSON {From, Content}
-        var message Message
-        if err := json.Unmarshal(msg.Data, &message); err == nil && (message.From != "" || message.Content != "") {
-            log.Printf("[MESSAGE] From: %s | Content: %s", message.From, message.Content)
-            continue
-        }
+		// Primeiro tenta interpretar como JSON {From, Content}
+		var message Message
+		if err := json.Unmarshal(msg.Data, &message); err == nil && (message.From != "" || len(message.Content) != 0) {
+			log.Printf("[MESSAGE] From: %s | Content: %s", message.From, message.Content)
+			continue
+		}
 
-        // Caso contrário, trata como texto bruto
-        log.Printf("[MESSAGE] Raw: %s", string(msg.Data))
+		// Caso contrário, trata como texto bruto
+		log.Printf("[MESSAGE] Raw: %s", string(msg.Data))
 	}
 }
 
 // PublishMessage serializa e publica uma mensagem no tópico atual
-func (s *PubSubService) PublishMessage(content string) error {
+func (s *PubSubService) PublishMessage(content []string) error {
 	msg := Message{
 		From:    s.peerID,
 		Content: content,
@@ -109,5 +109,3 @@ func (s *PubSubService) Close() error {
 	s.sub.Cancel()
 	return s.topic.Close()
 }
-
-

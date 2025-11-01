@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -30,7 +29,6 @@ func createRepo(repoPath string) bool {
 	//Ignora o primeiro valor devolvido e de seguida verifica se o ficheiro existe
 	_, err := os.Stat(repoPath)
 
-	//Se existe ficheiro
 	if err == nil {
 		return true
 	}
@@ -43,6 +41,7 @@ func createRepo(repoPath string) bool {
 
 	//Tenta criar o diretório, Se der erro, mostra uma mensagem no log e devolve falso
 	err = os.Mkdir(repoPath, 0750)
+
 	//Se der erro
 	if err != nil {
 		log.Printf("Failed to create repo directory: %v", err)
@@ -51,6 +50,7 @@ func createRepo(repoPath string) bool {
 
 	//Tenta criar a configuração do repositório.
 	cfg, err := config.Init(io.Discard, 2048)
+
 	//Se der erro
 	if err != nil {
 		log.Printf("Failed to create repo config: %v", err)
@@ -58,7 +58,7 @@ func createRepo(repoPath string) bool {
 	}
 
 	//inicializa o repositório no caminho repoPath usando a configuração cfg.
-	//Cria a estrutura do repositório no disco	
+	//Cria a estrutura do repositório no disco
 	err = fsrepo.Init(repoPath, cfg)
 	if err != nil {
 		log.Printf("Failed to initialize repo: %v", err)
@@ -68,7 +68,7 @@ func createRepo(repoPath string) bool {
 	return true
 }
 
-//Esta função serve para criar um nó IPFS a partir de um repositório existente
+// Esta função serve para criar um nó IPFS a partir de um repositório existente
 func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 	//Tenta abrir o repositório IPFS que está na pasta repoPath
@@ -91,9 +91,9 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 	//Prepara todas as definições que o nó IPFS precisa antes de ser criado
 	nodeOptions := &core.BuildCfg{
-		Online: true,
+		Online:  true,
 		Routing: libp2p.DHTOption,
-		Repo: repo,
+		Repo:    repo,
 	}
 
 	//Cria o nó IPFS com as opções definidas anteriomente
@@ -103,7 +103,8 @@ func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 	}
 
 	// Ativa descoberta mDNS para facilitar a ligação automática entre peers na LAN
-	if err := enableMdnsDiscovery(ctx, node); err != nil {
+	// mDNS publica o meu hostname na rede
+	if err := enableMdnsDiscovery(node); err != nil {
 		log.Printf("mDNS discovery error: %v", err)
 	}
 
@@ -126,15 +127,16 @@ func (n *notifeeMdns) HandlePeerFound(pi libpeer.AddrInfo) {
 	}()
 }
 
-func enableMdnsDiscovery(ctx context.Context, node *core.IpfsNode) error {
+func enableMdnsDiscovery(node *core.IpfsNode) error {
 	service := mdns.NewMdnsService(node.PeerHost, "sdt-mdns", &notifeeMdns{node: node})
 	return service.Start()
 }
 
-
 // main: carrega plugins, cria o nó IPFS, inicializa Pub/Sub e API HTTP
 func main() {
-	repoPath := "C:\\Users\\bento\\.ipfs"
+	repoPath := "C:\\Users\\admin\\.ipfs"
+
+	cidVector := []string{} //new - slice para guardar CIDs
 
 	plugins, err := loader.NewPluginLoader(repoPath) // gestor de plugins do IPFS
 	if err != nil {
@@ -147,23 +149,23 @@ func main() {
 	}
 
 	if err := plugins.Inject(); err != nil {
-		
+
 		panic(fmt.Errorf("error initializing plugins: %s", err))
 	}
 
 	ctx := context.Background()
-    
-    node, err := createNode(ctx, repoPath)
-    if err != nil {
-        log.Fatalf("Error creating IPFS node: %v", err)
-    } 
+
+	node, err := createNode(ctx, repoPath)
+	if err != nil {
+		log.Fatalf("Error creating IPFS node: %v", err)
+	}
 
 	ipfsService, err := coreapi.NewCoreAPI(node) // CoreAPI de alto nível para IPFS
 	if err != nil {
 		log.Fatalf("Error creating IPFS CoreAPI: %v", err)
 	}
 
-    // Conexão a peers é automática via mDNS (LAN) e através da rede IPFS/libp2p padrão
+	// Conexão a peers é automática via mDNS (LAN) e através da rede IPFS/libp2p padrão
 
 	// outputPath := "randomFile.txt"
 	//
@@ -172,7 +174,7 @@ func main() {
 	//
 	// files.WriteTo(ficheiro,outputPath)
 
-	fmt.Println("IPFS Node created successfully: "+node.Identity.String())
+	fmt.Println("IPFS Node created successfully: " + node.Identity.String())
 
 	pubSubService, err := messaging.NewPubSubService(ctx, node, "batatas") // serviço Pub/Sub
 
@@ -182,31 +184,31 @@ func main() {
 
 	log.Printf("Subscribed to topic: %s as %s", "batatas", node.Identity.String()) // confirmação
 
-	// Publica uma mensagem de presença ao iniciar (ajuda a validar receção entre peers)
-	if err := pubSubService.PublishMessage("Node online: " + node.Identity.String()); err != nil {
+	// Publica uma mensagem de presença ao iniciar
+	/*if err := pubSubService.PublishMessage("Node online: " + node.Identity.String()); err != nil {
 		log.Printf("Falha ao publicar mensagem de presença: %v", err)
-	}
+	}*/
 
 	// Loop de consola: cada linha escrita será publicada no tópico
-	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		fmt.Println("Type a message and press Enter to publish to 'batatas':")
-		for scanner.Scan() {
-			text := scanner.Text()
-			if text == "" {
-				continue
-			}
-			if err := pubSubService.PublishMessage(text); err != nil {
-				log.Printf("Failed to publish from console: %v", err)
-			} else {
-				log.Printf("Published from console: %s", text)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			log.Printf("Console read error: %v", err)
-		}
-	}()
-	api.Initialize(ctx, ipfsService, pubSubService) // arranca a API HTTP (porta 9000)
+	// go func() {
+	// 	scanner := bufio.NewScanner(os.Stdin)
+	// 	fmt.Println("Type a message and press Enter to publish to 'batatas':")
+	// 	for scanner.Scan() {
+	// 		text := scanner.Text()
+	// 		if text == "" {
+	// 			continue
+	// 		}
+	// 		if err := pubSubService.PublishMessage(text); err != nil {
+	// 			log.Printf("Failed to publish from console: %v", err)
+	// 		} else {
+	// 			log.Printf("Published from console: %s", text)
+	// 		}
+	// 	}
+	// 	if err := scanner.Err(); err != nil {
+	// 		log.Printf("Console read error: %v", err)
+	// 	}
+	// }()
+	api.Initialize(ctx, ipfsService, pubSubService, cidVector) // arranca a API HTTP (porta 9000)
 }
 
 // connectToPeers tenta ligar aos multiaddrs fornecidos usando a CoreAPI (Swarm.Connect)
