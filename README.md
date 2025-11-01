@@ -3,7 +3,7 @@
 Este projeto contêm a implementação do sistema distribuido descrito nos requesitos do trabalho prático de SDT.
 
 Estrutura do projeto:
-````
+```
 SDTPROJETO-MAIN/
 |- /node/
      |- api/ #
