@@ -8,6 +8,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"flag"
+	"bufio"
+	"strings"
 
 	"sdt/node/api"
 	"sdt/node/services/messaging"
@@ -18,8 +21,10 @@ import (
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo/fsrepo"
+	iface "github.com/ipfs/kubo/core/coreiface"
 	libpeer "github.com/libp2p/go-libp2p/core/peer"
 	mdns "github.com/libp2p/go-libp2p/p2p/discovery/mdns"
+	// ma "github.com/multiformats/go-multiaddr"
 )
 
 // createRepo garante que o repositório IPFS existe no caminho indicado.
@@ -132,9 +137,71 @@ func enableMdnsDiscovery(node *core.IpfsNode) error {
 	return service.Start()
 }
 
+
+func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath string) error {
+
+	peers := []libpeer.ID{}
+
+	
+
+    peersFile, err := os.Open(peersFilePath)
+    if err != nil {
+        log.Fatal(err)
+		return nil
+    }
+
+    defer peersFile.Close()
+
+    scanner := bufio.NewScanner(peersFile)
+
+    for scanner.Scan() {
+
+		peerIdString := strings.Trim(scanner.Text()," \n\t")
+		peerID, err := libpeer.Decode(peerIdString)
+
+		if(err != nil) {
+			return err
+		}
+
+		peers = append(peers, peerID)
+		log.Println("New peer added to array : "+peerID)
+    }
+
+    if err := scanner.Err(); err != nil {
+        log.Fatal(err)
+		return nil
+    }
+	
+
+	if(len(peers) > 0){
+
+		for _, peerID := range peers {
+
+			addr := libpeer.AddrInfo{ID:peerID}
+
+
+			err := ipfs.Swarm().Connect(ctx, addr)
+			if err != nil {
+				log.Printf("failed to connect to %s: %s", addr.ID, err)
+			}
+
+		}
+
+	}
+
+	return nil
+
+
+}
+
 // main: carrega plugins, cria o nó IPFS, inicializa Pub/Sub e API HTTP
 func main() {
-	repoPath := "C:\\Users\\admin\\.ipfs"
+
+	var repoPath string
+
+	flag.StringVar(&repoPath,"r",".ipfs","repositório ipfs")
+
+
 
 	cidVector := []string{} //new - slice para guardar CIDs
 
@@ -160,6 +227,7 @@ func main() {
 		log.Fatalf("Error creating IPFS node: %v", err)
 	}
 
+
 	ipfsService, err := coreapi.NewCoreAPI(node) // CoreAPI de alto nível para IPFS
 	if err != nil {
 		log.Fatalf("Error creating IPFS CoreAPI: %v", err)
@@ -176,13 +244,26 @@ func main() {
 
 	fmt.Println("IPFS Node created successfully: " + node.Identity.String())
 
-	pubSubService, err := messaging.NewPubSubService(ctx, node, "batatas") // serviço Pub/Sub
+	pubSubService, err := messaging.NewPubSubService(ctx, node, "uploadFile") // serviço Pub/Sub
 
 	if err != nil {
 		log.Fatalf("Error creating PubSub service: %v", err)
 	}
 
-	log.Printf("Subscribed to topic: %s as %s", "batatas", node.Identity.String()) // confirmação
+	log.Printf("Subscribed to topic: %s as %s", "uploadFile", node.Identity.String()) // confirmação
+
+	fmt.Println("Connecting to outside network peers")
+
+	err = connectToPeers(ctx, ipfsService, "peers.txt")
+
+	if err != nil {
+		log.Fatalf("Failed to connect to peers %v", err)
+	}
+
+
+
+
+	
 
 	// Publica uma mensagem de presença ao iniciar
 	/*if err := pubSubService.PublishMessage("Node online: " + node.Identity.String()); err != nil {
@@ -208,6 +289,7 @@ func main() {
 	// 		log.Printf("Console read error: %v", err)
 	// 	}
 	// }()
+
 	api.Initialize(ctx, ipfsService, pubSubService, cidVector) // arranca a API HTTP (porta 9000)
 }
 
