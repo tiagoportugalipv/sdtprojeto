@@ -3,3 +3,4 @@ VMs
 */.env
 */.venv
 .env
+*/.ipfs
