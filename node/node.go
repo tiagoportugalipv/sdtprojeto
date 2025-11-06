@@ -67,8 +67,7 @@ func createRepo(repoPath string) bool {
 	err = fsrepo.Init(repoPath, cfg)
 	if err != nil {
 		log.Printf("Failed to initialize repo: %v", err)
-		return false
-	}
+		return false }
 
 	return true
 }
@@ -142,19 +141,17 @@ func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath strin
 
 	peers := []libpeer.ID{}
 
-	
-
-    peersFile, err := os.Open(peersFilePath)
-    if err != nil {
-        log.Fatal(err)
+	peersFile, err := os.Open(peersFilePath)
+	if err != nil {
+	log.Fatal(err)
 		return nil
-    }
+	}
 
-    defer peersFile.Close()
+	defer peersFile.Close()
 
-    scanner := bufio.NewScanner(peersFile)
+	scanner := bufio.NewScanner(peersFile)
 
-    for scanner.Scan() {
+	for scanner.Scan() {
 
 		peerIdString := strings.Trim(scanner.Text()," \n\t")
 		peerID, err := libpeer.Decode(peerIdString)
@@ -165,27 +162,27 @@ func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath strin
 
 		peers = append(peers, peerID)
 		log.Println("New peer added to array : "+peerID)
-    }
+	}
 
-    if err := scanner.Err(); err != nil {
-        log.Fatal(err)
+	if err := scanner.Err(); err != nil {
+	log.Fatal(err)
 		return nil
-    }
+	}
 	
 
 	if(len(peers) > 0){
 
-		for _, peerID := range peers {
+	for _, peerID := range peers {
 
-			addr := libpeer.AddrInfo{ID:peerID}
+		addr := libpeer.AddrInfo{ID:peerID}
 
 
-			err := ipfs.Swarm().Connect(ctx, addr)
-			if err != nil {
-				log.Printf("failed to connect to %s: %s", addr.ID, err)
-			}
-
+		err := ipfs.Swarm().Connect(ctx, addr)
+		if err != nil {
+			log.Printf("failed to connect to %s: %s", addr.ID, err)
 		}
+
+	}
 
 	}
 
