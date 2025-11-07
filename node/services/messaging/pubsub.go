@@ -4,8 +4,11 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
+
+	"sdt/node/types"
 
 	"github.com/ipfs/kubo/core"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -74,38 +77,32 @@ func (s *PubSubService) listenMessages() {
 	for {
 		msg, err := s.sub.Next(s.ctx)
 		if err != nil {
-			// Continua em caso de erro temporário ao receber
 			log.Printf("Error receiving message: %v", err)
+			return
+		}
+
+		var update types.DocumentUpdate
+		if err := json.Unmarshal(msg.Data, &update); err != nil {
+			log.Printf("Failed to parse message: %v", err)
 			continue
 		}
 
-		// Primeiro tenta interpretar como JSON {From, Content}
-		var message Message
-		if err := json.Unmarshal(msg.Data, &message); err == nil && (message.From != "" || len(message.Content) != 0) {
-			log.Printf("[MESSAGE] From: %s | Content: %s", message.From, message.Content)
-			continue
-		}
-
-		// Caso contrário, trata como texto bruto
-		log.Printf("[MESSAGE] Raw: %s", string(msg.Data))
+		// Aqui os peers recebem e armazenam
+		log.Printf("[PEER %s] Received CID: %s (v%d), Embeddings dim: %d",
+			s.peerID, update.NewCID, update.VectorVersion, len(update.Embeddings))
 	}
 }
 
 // PublishMessage serializa e publica uma mensagem no tópico atual
-func (s *PubSubService) PublishMessage(content []string) error {
-	msg := Message{
-		From:    s.peerID,
-		Content: content,
+func (s *PubSubService) PublishMessage(messageJSON string) error {
+	if s.topic == nil {
+		return fmt.Errorf("topic not initialized")
 	}
-	msgBytes, err := json.Marshal(msg)
-	if err != nil {
+
+	if err := s.topic.Publish(s.ctx, []byte(messageJSON)); err != nil {
 		return err
 	}
-	return s.topic.Publish(s.ctx, msgBytes)
-}
 
-// Close encerra a subscrição e fecha o tópico
-func (s *PubSubService) Close() error {
-	s.sub.Cancel()
-	return s.topic.Close()
+	log.Printf("[%s] Published: %s", s.peerID, messageJSON)
+	return nil
 }

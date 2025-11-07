@@ -3,25 +3,27 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"flag"
-	"bufio"
 	"strings"
+	"path/filepath"
 
 	"sdt/node/api"
+	controllers "sdt/node/api/controllers/io"
 	"sdt/node/services/messaging"
 
 	"github.com/ipfs/kubo/config"
 	"github.com/ipfs/kubo/core"
 	"github.com/ipfs/kubo/core/coreapi"
+	iface "github.com/ipfs/kubo/core/coreiface"
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo/fsrepo"
-	iface "github.com/ipfs/kubo/core/coreiface"
 	libpeer "github.com/libp2p/go-libp2p/core/peer"
 	mdns "github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	// ma "github.com/multiformats/go-multiaddr"
@@ -137,48 +139,43 @@ func enableMdnsDiscovery(node *core.IpfsNode) error {
 	return service.Start()
 }
 
-
 func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath string) error {
 
 	peers := []libpeer.ID{}
 
-	
-
-    peersFile, err := os.Open(peersFilePath)
-    if err != nil {
-        log.Fatal(err)
+	peersFile, err := os.Open(peersFilePath)
+	if err != nil {
+		log.Fatal(err)
 		return nil
-    }
+	}
 
-    defer peersFile.Close()
+	defer peersFile.Close()
 
-    scanner := bufio.NewScanner(peersFile)
+	scanner := bufio.NewScanner(peersFile)
 
-    for scanner.Scan() {
+	for scanner.Scan() {
 
-		peerIdString := strings.Trim(scanner.Text()," \n\t")
+		peerIdString := strings.Trim(scanner.Text(), " \n\t")
 		peerID, err := libpeer.Decode(peerIdString)
 
-		if(err != nil) {
+		if err != nil {
 			return err
 		}
 
 		peers = append(peers, peerID)
-		log.Println("New peer added to array : "+peerID)
-    }
+		log.Println("New peer added to array : " + peerID)
+	}
 
-    if err := scanner.Err(); err != nil {
-        log.Fatal(err)
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
 		return nil
-    }
-	
+	}
 
-	if(len(peers) > 0){
+	if len(peers) > 0 {
 
 		for _, peerID := range peers {
 
-			addr := libpeer.AddrInfo{ID:peerID}
-
+			addr := libpeer.AddrInfo{ID: peerID}
 
 			err := ipfs.Swarm().Connect(ctx, addr)
 			if err != nil {
@@ -191,19 +188,29 @@ func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath strin
 
 	return nil
 
-
 }
 
 // main: carrega plugins, cria o nó IPFS, inicializa Pub/Sub e API HTTP
 func main() {
 
 	var repoPath string
+	
+	// Obtém a pasta home do utilizador
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("Failed to get home directory: %v", err)
+	}
 
-	flag.StringVar(&repoPath,"r",".ipfs","repositório ipfs")
+	// Define o caminho por defeito para ~/.ipfs
+	defaultRepo := filepath.Join(homeDir, ".ipfs")
+	
+	flag.StringVar(&repoPath, "r", defaultRepo, "repositório ipfs")
+	flag.Parse()
 
+	fmt.Println("Using IPFS repository:", repoPath)
 
+	cidVector := []string{}
 
-	cidVector := []string{} //new - slice para guardar CIDs
 
 	plugins, err := loader.NewPluginLoader(repoPath) // gestor de plugins do IPFS
 	if err != nil {
@@ -226,7 +233,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error creating IPFS node: %v", err)
 	}
-
 
 	ipfsService, err := coreapi.NewCoreAPI(node) // CoreAPI de alto nível para IPFS
 	if err != nil {
@@ -260,10 +266,11 @@ func main() {
 		log.Fatalf("Failed to connect to peers %v", err)
 	}
 
-
-
-
-	
+	log.Println("Initializing embeddings service...")
+	if err := controllers.InitEmbeddings(); err != nil {
+		log.Fatalf("Failed to initialize embeddings: %v", err)
+	}
+	log.Println("Embeddings service ready")
 
 	// Publica uma mensagem de presença ao iniciar
 	/*if err := pubSubService.PublishMessage("Node online: " + node.Identity.String()); err != nil {
