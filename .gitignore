@@ -1,6 +1,7 @@
 VMs
 */VMs
-*/.env
-*/.venv
 .env
-*/.ipfs
+.ipfs
+.peers.txt
+models/*
+go.sum
