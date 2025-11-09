@@ -17,7 +17,9 @@ import (
 
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
-	"github.com/ipfs/kubo/config" "github.com/ipfs/kubo/core" "github.com/ipfs/kubo/core/coreapi"
+	"github.com/ipfs/kubo/config"
+	"github.com/ipfs/kubo/core"
+	"github.com/ipfs/kubo/core/coreapi"
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo/fsrepo"
@@ -35,7 +37,7 @@ type NodeState int
 
 const (
 	FOLLOWER NodeState = iota // 0
-    CANDIDATE
+	CANDIDATE
 	LEADER
 )
 
