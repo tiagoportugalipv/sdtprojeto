@@ -1,189 +1,211 @@
-// Programa principal do nó: inicializa o repositório IPFS, cria o nó,
-// configura Pub/Sub e arranca a API HTTP.
-package main
+package node
 
 import (
+
+	// bibs padrão
+
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	// "log"
 	"os"
-	"flag"
-	"bufio"
+	"time"
 	"strings"
 
-	"sdt/node/api"
-	"sdt/node/services/messaging"
+	// bibs externas
 
+	"github.com/ipfs/boxo/files"
+	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/config"
 	"github.com/ipfs/kubo/core"
 	"github.com/ipfs/kubo/core/coreapi"
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo/fsrepo"
+	"github.com/ipfs/kubo/repo"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	iface "github.com/ipfs/kubo/core/coreiface"
-	libpeer "github.com/libp2p/go-libp2p/core/peer"
-	mdns "github.com/libp2p/go-libp2p/p2p/discovery/mdns"
-	// ma "github.com/multiformats/go-multiaddr"
 )
 
-// createRepo garante que o repositório IPFS existe no caminho indicado.
-// Devolve true em caso de sucesso (existente ou criado) e false se falhar.
-func createRepo(repoPath string) bool {
+// Estruturas e Setup //
 
-	//Ignora o primeiro valor devolvido e de seguida verifica se o ficheiro existe
-	_, err := os.Stat(repoPath)
+type NodeState int
 
-	if err == nil {
-		return true
-	}
+// Enum de estado
 
-	//true quando o erro é outro tipo de erro
-	if !os.IsNotExist(err) {
-		log.Printf("Failed to check repo directory: %v", err)
-		return false
-	}
+const (
+	FOLLOWER NodeState = iota // 0
+    CANDIDATE
+	LEADER
+)
 
-	//Tenta criar o diretório, Se der erro, mostra uma mensagem no log e devolve falso
-	err = os.Mkdir(repoPath, 0750)
+// Vetor de dados
 
-	//Se der erro
-	if err != nil {
-		log.Printf("Failed to create repo directory: %v", err)
-		return false
-	}
-
-	//Tenta criar a configuração do repositório.
-	cfg, err := config.Init(io.Discard, 2048)
-
-	//Se der erro
-	if err != nil {
-		log.Printf("Failed to create repo config: %v", err)
-		return false
-	}
-
-	//inicializa o repositório no caminho repoPath usando a configuração cfg.
-	//Cria a estrutura do repositório no disco
-	err = fsrepo.Init(repoPath, cfg)
-	if err != nil {
-		log.Printf("Failed to initialize repo: %v", err)
-		return false }
-
-	return true
+type Vector struct {
+	Ver int
+	Content []string
 }
 
-// Esta função serve para criar um nó IPFS a partir de um repositório existente
-func createNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
+// No
 
-	//Tenta abrir o repositório IPFS que está na pasta repoPath
-	repo, err := fsrepo.Open(repoPath)
+type Node struct {
+	IpfsCore *core.IpfsNode 
+	IpfsApi  iface.CoreAPI
+	CidVector Vector
+	VectorCache map[int]Vector
+	State NodeState
+}
 
-	//Se houver erro
+
+// Novo repositótio IPFS
+func newIpfsRepo(repoPath string) (error) {
+
+	_, err := os.Stat(repoPath)
+
+	// err == nil -> retornou info sobre o caminho -> caminho já existente	
+	if(err == nil){
+		err = errors.New("Dirétoria/Repositório já existente\n") 
+		return err
+	}
+
+	// Se existe outro tipo de erro para além do caminho não existir retornamos o erro
+	if(!os.IsNotExist(err)){
+		return err
+	}
+
+
+	// Criar a diretória
+	err = os.Mkdir(repoPath, 0750)
+
+	if(err != nil){
+		err = fmt.Errorf("Falha ao criar diretoria: %v\n",err)
+		return err
+	}
+	// Criar a configuração do repositório.
+	cfg, err := config.Init(io.Discard, 2048)
+
+
+	if err != nil {
+		err = fmt.Errorf("Falha ao criar configuração: %v\n",err)
+		return err
+	}
+
+
+	pluginInjection(repoPath)
+
+
+	// Inicializar repositório
+	err = fsrepo.Init(repoPath, cfg)
+
+	if err != nil {
+		err = fmt.Errorf("Falha ao iniciar: %v\n",err)
+		return err
+	}
+
+	return nil
+
+}
+
+// Novo nó ipfs
+func newIpfsNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
+
+	var repo repo.Repo	
+
+	err := pluginInjection(repoPath)
+
+	if(err == nil){
+		repo, err = fsrepo.Open(repoPath)
+	}
+
+	// Erro
 	if err != nil {
 
-		//Se não for criado o repositório
-		if !createRepo(repoPath) {
-			return nil, fmt.Errorf("failed to create repo")
+		//Criado novo repositório
+		err = newIpfsRepo(repoPath)
+		if err != nil {
+			return nil, fmt.Errorf("Falha ao criar novo repositório : %v\n",err)
 		}
+
 		//Tenta abrir o repositório que esta na pasta repoPath
 		repo, err = fsrepo.Open(repoPath)
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to open repo after creation: %v", err)
+			return nil, fmt.Errorf("Falha ao abrir novo repositótio : %v\n", err)
 		}
 	}
 
-	//Prepara todas as definições que o nó IPFS precisa antes de ser criado
+
+
+	// Defenições especificas do nó
 	nodeOptions := &core.BuildCfg{
 		Online:  true,
 		Routing: libp2p.DHTOption,
 		Repo:    repo,
 	}
 
-	//Cria o nó IPFS com as opções definidas anteriomente
-	node, err := core.NewNode(ctx, nodeOptions)
+
+	// Criação do nó
+	ipfsCore, err := core.NewNode(ctx, nodeOptions)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to create IPFS node: %v", err)
+		return nil, fmt.Errorf("Falha ao criar nó IPFS: %v\n", err)
 	}
 
-	// Ativa descoberta mDNS para facilitar a ligação automática entre peers na LAN
-	// mDNS publica o meu hostname na rede
-	if err := enableMdnsDiscovery(node); err != nil {
-		log.Printf("mDNS discovery error: %v", err)
-	}
+	return ipfsCore, nil
 
-	return node, nil
 }
 
-// notifeeMdns tenta ligar-se a peers descobertos via mDNS
-type notifeeMdns struct{ node *core.IpfsNode }
+// Connectar nó a peers
+func connectToPeers(ipfs iface.CoreAPI, peers []string) error {
 
-func (n *notifeeMdns) HandlePeerFound(pi libpeer.AddrInfo) {
-	if pi.ID == n.node.Identity {
-		return
-	}
-	go func() {
-		if err := n.node.PeerHost.Connect(context.Background(), pi); err != nil {
-			log.Printf("Failed to connect to discovered peer %s: %v", pi.ID.String(), err)
-		} else {
-			log.Printf("Connected to discovered peer: %s", pi.ID.String())
-		}
-	}()
-}
+	// Array para gerir nós desconectados	
+	unconnectedPeers := make(map[string]error)	
 
-func enableMdnsDiscovery(node *core.IpfsNode) error {
-	service := mdns.NewMdnsService(node.PeerHost, "sdt-mdns", &notifeeMdns{node: node})
-	return service.Start()
-}
-
-
-func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath string) error {
-
-	peers := []libpeer.ID{}
-
-	peersFile, err := os.Open(peersFilePath)
-	if err != nil {
-	log.Fatal(err)
-		return nil
-	}
-
-	defer peersFile.Close()
-
-	scanner := bufio.NewScanner(peersFile)
-
-	for scanner.Scan() {
-
-		peerIdString := strings.Trim(scanner.Text()," \n\t")
-		peerID, err := libpeer.Decode(peerIdString)
-
-		if(err != nil) {
-			return err
-		}
-
-		peers = append(peers, peerID)
-		log.Println("New peer added to array : "+peerID)
-	}
-
-	if err := scanner.Err(); err != nil {
-	log.Fatal(err)
-		return nil
-	}
-	
 
 	if(len(peers) > 0){
 
-	for _, peerID := range peers {
+		for _, peerIdString := range peers {
 
-		addr := libpeer.AddrInfo{ID:peerID}
+			// Descodificar o CID
+			peerId, err := peer.Decode(peerIdString)
+			addr := peer.AddrInfo{ID:peerId}
+
+			if(err != nil){
+				err = fmt.Errorf("Peer String Invalida: %v\n",err)
+				unconnectedPeers[peerIdString] = err
+				continue
+			}
+
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel() 
 
 
-		err := ipfs.Swarm().Connect(ctx, addr)
-		if err != nil {
-			log.Printf("failed to connect to %s: %s", addr.ID, err)
+			// Conectar com 1 peer
+			err = ipfs.Swarm().Connect(timeoutCtx, addr)
+
+
+			if(err != nil){
+				err = fmt.Errorf("Conexão não foi possivel: %v\n",err)
+				unconnectedPeers[peerIdString] = err
+			}
+
 		}
 
 	}
+	
+	// 1 ou + peers não conectados com sucesso -> erro
+	if len(unconnectedPeers) > 0 {
 
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("%d peers não conectados:\n\n", len(unconnectedPeers)))
+
+		for peerID, err := range unconnectedPeers {
+			sb.WriteString(fmt.Sprintf(" - %s → %v\n", peerID, err))
+		}
+
+		return fmt.Errorf("%s",sb.String())
 	}
 
 	return nil
@@ -191,104 +213,104 @@ func connectToPeers(ctx context.Context, ipfs iface.CoreAPI, peersFilePath strin
 
 }
 
-// main: carrega plugins, cria o nó IPFS, inicializa Pub/Sub e API HTTP
-func main() {
 
-	var repoPath string
+// Injeção de plugins (sem isto dá erro: unknown datastore type: flatfs)
+// https://discuss.ipfs.tech/t/fixed-unknown-datastore-type-flatfs/15805/5
+func pluginInjection(repoPath string)(error){
 
-	flag.StringVar(&repoPath,"r",".ipfs","repositório ipfs")
-
-
-
-	cidVector := []string{} //new - slice para guardar CIDs
-
-	plugins, err := loader.NewPluginLoader(repoPath) // gestor de plugins do IPFS
+	plugins, err := loader.NewPluginLoader(repoPath)
 	if err != nil {
-		//indica um erro e interrompe a execução do ficheiro
-		panic(fmt.Errorf("error loading plugins: %s", err))
+		err = fmt.Errorf("Erro ao carregar plugins: %s", err)
+		return err
 	}
 
 	if err := plugins.Initialize(); err != nil {
-		panic(fmt.Errorf("error initializing plugins: %s", err))
+
+		err = fmt.Errorf("Erro ao inicializar plugins: %s", err)
+		return err
 	}
 
 	if err := plugins.Inject(); err != nil {
-
-		panic(fmt.Errorf("error initializing plugins: %s", err))
+		err = fmt.Errorf("Erro ao injetar plugins: %s", err)
+		return err
 	}
 
-	ctx := context.Background()
+	return nil
 
-	node, err := createNode(ctx, repoPath)
-	if err != nil {
-		log.Fatalf("Error creating IPFS node: %v", err)
-	}
-
-
-	ipfsService, err := coreapi.NewCoreAPI(node) // CoreAPI de alto nível para IPFS
-	if err != nil {
-		log.Fatalf("Error creating IPFS CoreAPI: %v", err)
-	}
-
-	// Conexão a peers é automática via mDNS (LAN) e através da rede IPFS/libp2p padrão
-
-	// outputPath := "randomFile.txt"
-	//
-	// cidFicheiro,_ := cid.Decode("QmYaBU4DJyEZCntf2Pua2kdgnXDz7gntSzuUwxer4XgAX9")
-	// ficheiro,_ := ipfsService.Unixfs().Get(ctx,path.FromCid(cidFicheiro));
-	//
-	// files.WriteTo(ficheiro,outputPath)
-
-	fmt.Println("IPFS Node created successfully: " + node.Identity.String())
-
-	pubSubService, err := messaging.NewPubSubService(ctx, node, "uploadFile") // serviço Pub/Sub
-
-	if err != nil {
-		log.Fatalf("Error creating PubSub service: %v", err)
-	}
-
-	log.Printf("Subscribed to topic: %s as %s", "uploadFile", node.Identity.String()) // confirmação
-
-	fmt.Println("Connecting to outside network peers")
-
-	err = connectToPeers(ctx, ipfsService, "peers.txt")
-
-	if err != nil {
-		log.Fatalf("Failed to connect to peers %v", err)
-	}
-
-
-
-
-	
-
-	// Publica uma mensagem de presença ao iniciar
-	/*if err := pubSubService.PublishMessage("Node online: " + node.Identity.String()); err != nil {
-		log.Printf("Falha ao publicar mensagem de presença: %v", err)
-	}*/
-
-	// Loop de consola: cada linha escrita será publicada no tópico
-	// go func() {
-	// 	scanner := bufio.NewScanner(os.Stdin)
-	// 	fmt.Println("Type a message and press Enter to publish to 'batatas':")
-	// 	for scanner.Scan() {
-	// 		text := scanner.Text()
-	// 		if text == "" {
-	// 			continue
-	// 		}
-	// 		if err := pubSubService.PublishMessage(text); err != nil {
-	// 			log.Printf("Failed to publish from console: %v", err)
-	// 		} else {
-	// 			log.Printf("Published from console: %s", text)
-	// 		}
-	// 	}
-	// 	if err := scanner.Err(); err != nil {
-	// 		log.Printf("Console read error: %v", err)
-	// 	}
-	// }()
-
-	api.Initialize(ctx, ipfsService, pubSubService, cidVector) // arranca a API HTTP (porta 9000)
 }
 
-// connectToPeers tenta ligar aos multiaddrs fornecidos usando a CoreAPI (Swarm.Connect)
-// ligação manual via variável de ambiente removida para manter descoberta automática
+
+
+
+// Criar novo nó
+
+// Para colocar o nó a leader basta ativar esta flag
+var LeaderFlag bool
+
+
+func Create(repoPath string,  peers []string) (*Node,error){
+
+	ipfsCore, err := newIpfsNode(context.Background(),repoPath);
+
+	if(err!=nil){
+		return nil,err
+	}
+
+	ipfsCoreApi,err := coreapi.NewCoreAPI(ipfsCore)
+
+
+	if(err!=nil){
+		return nil,err
+	}
+
+	if(peers != nil && cap(peers) > 0){
+		err = connectToPeers(ipfsCoreApi,peers)
+	}
+
+	state := FOLLOWER
+
+	if(LeaderFlag){
+		state = LEADER
+	}
+
+	n := Node {
+
+		IpfsCore : ipfsCore,
+		IpfsApi : ipfsCoreApi,
+		VectorCache: make(map[int]Vector),
+		CidVector: 
+			Vector {
+				Ver: 0,
+				Content: []string{},
+			},
+		State: state,
+
+	}
+
+	return &n,err
+
+}
+
+// Funções auxiliares //
+
+// Upload de ficheiros
+func AddFile(nd *Node,fileBytes []byte) (path.ImmutablePath,error){
+
+
+	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fileCid, err := nd.IpfsApi.Unixfs().Add(uploadCtx,files.NewBytesFile(fileBytes))
+
+	if(err != nil){
+		err = fmt.Errorf("Erro ao dar upload de ficheiro: %v\n",err)
+	}
+
+
+	return fileCid,err
+
+}
+
+
+
+
