@@ -39,7 +39,7 @@ type AppendEntryMessage struct {
 
 func PublishTo(nd *node.Node, topico Topico, msg any)(error){
 
-	var err error
+    var err error
     buf := new(bytes.Buffer)
     encoder := gob.NewEncoder(buf)
 	pubsubInt := nd.IpfsApi.PubSub()

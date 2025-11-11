@@ -85,6 +85,9 @@ func newIpfsRepo(repoPath string) (error) {
 	}
 	// Criar a configuração do repositório.
 	cfg, err := config.Init(io.Discard, 2048)
+	cfg.Pubsub.Router="gossipsub"
+	cfg.Pubsub.Enabled=1
+	cfg.Ipns.UsePubsub=1
 
 
 	if err != nil {
@@ -140,9 +143,13 @@ func newIpfsNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 
 	// Defenições especificas do nó
 	nodeOptions := &core.BuildCfg{
-		Online:  true,
-		Routing: libp2p.DHTOption,
-		Repo:    repo,
+		Online:    true,
+		Routing:   libp2p.DHTOption,
+		Repo:      repo,
+		Permanent: true,
+		ExtraOpts: map[string]bool{
+			"pubsub": true,
+		},
 	}
 
 

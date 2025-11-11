@@ -97,7 +97,11 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
             Embeddings: embs,
     }
 
-    messaging.PublishTo(nd,messaging.AEM,msg)
+    err = messaging.PublishTo(nd,messaging.AEM,msg)
+
+    if(err != nil){
+        log.Printf("Falha ao enviar estrutura: %v",err) 
+    }
 
     ctx.JSON(http.StatusOK, gin.H{
         "message": "File added successfully, CID : "+fileCid.String(),
