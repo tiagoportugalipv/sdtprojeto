@@ -15,6 +15,7 @@ import (
 	"projeto/node"
 	"projeto/services/embedding"
 	"projeto/services/messaging"
+        "projeto/types"
 )
 
 func UploadFile(ctx *gin.Context, nd *node.Node) {
@@ -104,7 +105,5 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
         "message": "File added successfully, CID : "+fileCid.String(),
         "filename": file.Filename,
         "cid": fileCid.String(),
-        "vetorHash": nd.CidVectorStaging.Hash(),
-        "vetor enviado" : nd.CidVectorStaging.String(),
     })
 }

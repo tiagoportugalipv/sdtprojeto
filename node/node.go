@@ -60,8 +60,10 @@ type Node struct {
 	IpfsApi  iface.CoreAPI
 	CidVector Vector
 	CidVectorStaging Vector 
+	EmbsStaging [][]float32
 	StagingAKCs int
 	State NodeState
+	CommitDone chan struct{} // Para depois sinalizar a api para responder ao cliente depois dos COMMITACK
 }
 
 
@@ -307,9 +309,11 @@ func Create(repoPath string,  peers []string) (*Node,error){
 		IpfsCore : ipfsCore,
 		IpfsApi : ipfsCoreApi,
 		CidVectorStaging: emptyVector,
+		EmbsStaging: [][]float32{},
 		StagingAKCs: stagingACKs,
 		CidVector: emptyVector,
 		State: state,
+		CommitDone: make(chan struct{}),
 
 	}
 
@@ -355,7 +359,7 @@ func (nd *Node) Run(){
 
 // Follower
 
-func receiveNewVector(nd *Node,v Vector){
+func receiveNewVector(nd *Node,v Vector, embs [][]float32){
 
 	if(nd.CidVector.Ver < v.Ver && isSubset(nd.CidVector,v)){
 		fmt.Printf("Vetor recebido:\n%v\n",v.String())
@@ -364,6 +368,7 @@ func receiveNewVector(nd *Node,v Vector){
 	}
 
 	nd.CidVectorStaging = v
+	nd.EmbsStaging = embs
 
 }
 
@@ -376,44 +381,25 @@ func followerRoutine(nd *Node,ctx context.Context){
 
         fmt.Printf("A iniciar routina follower\n")
 
-	for {
+	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any) {
+	    aemMsg,ok := msg.(messaging.AppendEntryMessage)
+	    if(!ok){
+	        fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
+	    }
+	    fmt.Printf("Recebi AE message com vetor\n%v\n",aemMsg.Vector.String())
+	    receiveNewVector(nd,aemMsg.Vector,aemMsg.Embeddings)
+	})
 
-		select {
+	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any) { 
+		fmt.Printf("Mensagem de commit recebida\n")
+		fmt.Printf("Vetor atual :\n%v\n",nd.CidVector.String())
+		receiveCommit(nd) 
+		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
+	})
 
-		    case <-ctx.Done():
-			fmt.Printf("A terminar routina follower\n")
-			return
-		   
-		    default : 
-
-			err := messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any) {
-			    aemMsg,ok := msg.(messaging.AppendEntryMessage)
-			    if(!ok){
-				fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
-			    }
-			    fmt.Printf("Recebi AE message com vetor\n%v\n",aemMsg.Vector.String())
-			    receiveNewVector(nd,aemMsg.Vector)
-			})
-
-			if(err != nil){
-			    fmt.Printf("Erro ao escutar por AppendEntryMessage, %v\n",err) 
-			}
-
-			err = messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any) {
-			    receiveCommit(nd)
-			})
-
-
-			if(err != nil){
-			    fmt.Printf("Erro ao escutar por CommitMessage, %v\n",err) 
-			}
-
-
-		}
-
-	}
-
-
+	// Espera bloqueante (equanto o context não for cancelado)
+	<-ctx.Done()
+        fmt.Printf("A terminar rotina follower\n")
 
 }
 
@@ -441,45 +427,31 @@ func liderRoutine(nd *Node,ctx context.Context){
 
         fmt.Printf("A iniciar routina lider\n")
 
-	for {
-
-	    select {
-		case <-ctx.Done():
-
-			fmt.Printf("A terminar routina follower\n")
-			return
-
-		default:
-
-			err := messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
-			    ackmsg,ok := msg.(messaging.AckMessage)
-			    if(!ok){
-				fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
-			    }
-
-			    fmt.Printf("Recebi ACK de %v, com hash %v\n",sender,ackmsg.Hash)
-
-			    valid := receiveAck(nd,ackmsg.Hash)
-
-			    if(valid){
-			        fmt.Printf("Numeros de ACKs: %v/%v",nd.StagingAKCs,Npeers)  
-			    } else {
-				fmt.Printf("Vetor em staging atual:\n%v\n",nd.CidVectorStaging.String())
-			    	fmt.Printf("ACK hash não valida\n")
-			    }
-
-			    
-			})
-
-
-			if(err != nil){
-			    fmt.Printf("Erro ao escutar por ACKMessages, %v\n",err) 
-			}
-
+	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
+	    ackmsg,ok := msg.(messaging.AckMessage)
+	    if(!ok){
+		fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
 	    }
 
+	    fmt.Printf("Recebi ACK de %v, com hash %v\n",sender,ackmsg.Hash)
 
-	}
+	    valid := receiveAck(nd,ackmsg.Hash)
+
+	    if(valid){
+		fmt.Printf("Numeros de ACKs: %v/%v",nd.StagingAKCs,Npeers)  
+	    } else {
+		fmt.Printf("Vetor em staging atual:\n%v\n",nd.CidVectorStaging.String())
+		fmt.Printf("ACK hash não valida\n")
+	    }
+
+		    
+	})
+
+
+	// Espera bloqueante (equanto o context não for cancelado)
+	<-ctx.Done()
+        fmt.Printf("A terminar rotina follower\n")
+
 
 }
 

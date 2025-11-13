@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// Flags
+
+var UploadCompleted = false
+
 // Estruturas Base
 
 type Vector struct {
