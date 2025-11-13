@@ -12,14 +12,16 @@ import (
 // Estruturas Base
 
 type Vector struct {
-	Ver int
-	Content []string
+	Ver int // Versão
+	Content []string // Array de CIDs
 }
 
 
 func (v Vector) Hash() (string) {
 
-	// Nota : não utilizar gob para gerar hashes se não temos o caldo entornado
+    // Nota : não utilizar gob para gerar hashes se não temos o caldo entornado
+    // pelo que percebi o gob bytes ao conteudo original em prol da eficiencia de unmarshaling
+    // no que resulta hash diferentes para dados iguais
 
     jsonBytes, err := json.Marshal(v) 
     if err != nil {

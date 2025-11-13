@@ -36,8 +36,8 @@ import (
 
 // Estruturas e Setup //
 
+var Npeers int = 0 // Npeers na rede
 
-var Npeers int = 0
 type Vector = types.Vector
 
 
@@ -45,7 +45,7 @@ type Vector = types.Vector
 
 type NodeState int
 
-
+// Estados Raft
 const (
 	FOLLOWER NodeState = iota // 0
 	CANDIDATE
@@ -62,7 +62,7 @@ type Node struct {
 	CidVectorStaging Vector 
 	EmbsStaging [][]float32
 	StagingAKCs int
-	State NodeState
+	State NodeState // Estado do nó
 	CommitDone chan struct{} // Para depois sinalizar a api para responder ao cliente depois dos COMMITACK
 }
 
@@ -271,6 +271,7 @@ var LeaderFlag bool
 
 
 func Create(repoPath string,  peers []string) (*Node,error){
+
 	var npeers int
 
 	ipfsCore, err := newIpfsNode(context.Background(),repoPath);

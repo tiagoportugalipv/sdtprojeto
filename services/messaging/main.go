@@ -22,10 +22,10 @@ type Topico string
 type Vector = types.Vector
 
 const (
-    AEM Topico = "aem" // AppendEntryMessage 
-    TXT Topico = "txt"
-    ACK Topico = "ack"
-    COMM Topico = "commit"
+    AEM Topico = "aem" // Topico AppendEntryMessage 
+    TXT Topico = "txt" // Topico TextMessage
+    ACK Topico = "ack" // Topico Ack
+    COMM Topico = "commit" // Topico Commit
 )
 
 
@@ -48,7 +48,13 @@ type AppendEntryMessage struct {
     Embeddings [][]float32 
 }
 
+// Utilizamos gob pois suporta tipos nativos de go e é relativamente mais eficiente que json,
+// sacrificando no entanto intercompatibilidade com outras linguagens
+
+// Publicar Mensagens
 func PublishTo(pubsubInt iface.PubSubAPI, topico Topico, msg any)(error){
+
+    // Marshaling da mensagem
 
     var err error
     buf := new(bytes.Buffer)
@@ -57,6 +63,8 @@ func PublishTo(pubsubInt iface.PubSubAPI, topico Topico, msg any)(error){
     if err = encoder.Encode(msg); err != nil {
         return fmt.Errorf("Falha ao dar marshall da mensagem: %v\n", err)
     }
+
+    // Envio da mensagem
 
 
     publishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -72,6 +80,7 @@ func PublishTo(pubsubInt iface.PubSubAPI, topico Topico, msg any)(error){
 
 }
 
+// Receber mensagens
 func ListenTo(pubsubInt iface.PubSubAPI, topico Topico, callback func(sender peer.ID, msg any)) error {
 
     subscribeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -83,10 +92,14 @@ func ListenTo(pubsubInt iface.PubSubAPI, topico Topico, callback func(sender pee
     }
 
     for {
+
+        // Receber mensagens
         pubSubMsg, err := sub.Next(context.Background())
         if err != nil {
             return fmt.Errorf("Erro ao ouvir menssagens: %v", err)
         }
+
+        // Unmarshaling da mensagens
 
         buf := bytes.NewBuffer(pubSubMsg.Data())
         decoder := gob.NewDecoder(buf)
