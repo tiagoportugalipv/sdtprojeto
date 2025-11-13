@@ -9,19 +9,23 @@ import (
 	"time"
 
 	// bibs internas
-	"projeto/node"
+	"projeto/types"
 
 	// bibs externas
 	"github.com/libp2p/go-libp2p/core/peer"
+	iface "github.com/ipfs/kubo/core/coreiface"
 )
 
 // https://thesecretlivesofdata.com/raft/#replication
 
 type Topico string
+type Vector = types.Vector
 
 const (
     AEM Topico = "aem" // AppendEntryMessage 
     TXT Topico = "txt"
+    ACK Topico = "ack"
+    COMM Topico = "commit"
 )
 
 
@@ -29,17 +33,26 @@ type TextMessage struct {
     Text string 
 }
 
+
+type AckMessage struct {
+    Hash string 
+}
+
+
+type CommitMessage struct {
+    Version int 
+}
+
 type AppendEntryMessage struct {
-    Vector node.Vector 
+    Vector Vector 
     Embeddings [][]float32 
 }
 
-func PublishTo(nd *node.Node, topico Topico, msg any)(error){
+func PublishTo(pubsubInt iface.PubSubAPI, topico Topico, msg any)(error){
 
     var err error
     buf := new(bytes.Buffer)
     encoder := gob.NewEncoder(buf)
-    pubsubInt := nd.IpfsApi.PubSub()
 
     if err = encoder.Encode(msg); err != nil {
         return fmt.Errorf("Falha ao dar marshall da mensagem: %v\n", err)
@@ -59,9 +72,7 @@ func PublishTo(nd *node.Node, topico Topico, msg any)(error){
 
 }
 
-func ListenTo(nd *node.Node, topico Topico, callback func(sender peer.ID, msg any)) error {
-
-    pubsubInt := nd.IpfsApi.PubSub()
+func ListenTo(pubsubInt iface.PubSubAPI, topico Topico, callback func(sender peer.ID, msg any)) error {
 
     subscribeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
@@ -94,6 +105,18 @@ func ListenTo(nd *node.Node, topico Topico, callback func(sender peer.ID, msg an
                 return fmt.Errorf("Erro ao decodificar AppendEntryMessage: %v", err)
             }
             msg = aemMsg
+        case ACK:
+            var ackMsg AckMessage
+            if err := decoder.Decode(&ackMsg); err != nil {
+                return fmt.Errorf("Erro ao decodificar AckMessage: %v", err)
+            }
+            msg = ackMsg
+        case COMM:
+            var commMsg CommitMessage
+            if err := decoder.Decode(&commMsg); err != nil {
+                return fmt.Errorf("Erro ao decodificar AckMessage: %v", err)
+            }
+            msg = commMsg
         default:
             return fmt.Errorf("Topico desconhecido: %v", topico)
         }

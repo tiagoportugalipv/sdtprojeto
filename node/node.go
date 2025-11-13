@@ -8,10 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
 	// "log"
 	"os"
-	"time"
 	"strings"
+	"time"
+
+	// bibs internas
+	"projeto/services/messaging"
+	"projeto/types"
 
 	// bibs externas
 
@@ -22,8 +27,8 @@ import (
 	"github.com/ipfs/kubo/core/coreapi"
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
-	"github.com/ipfs/kubo/repo/fsrepo"
 	"github.com/ipfs/kubo/repo"
+	"github.com/ipfs/kubo/repo/fsrepo"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	iface "github.com/ipfs/kubo/core/coreiface"
@@ -31,9 +36,15 @@ import (
 
 // Estruturas e Setup //
 
-type NodeState int
+
+var Npeers int = 0
+type Vector = types.Vector
+
 
 // Enum de estado
+
+type NodeState int
+
 
 const (
 	FOLLOWER NodeState = iota // 0
@@ -41,12 +52,6 @@ const (
 	LEADER
 )
 
-// Vetor de dados
-
-type Vector struct {
-	Ver int
-	Content []string
-}
 
 // No
 
@@ -54,7 +59,8 @@ type Node struct {
 	IpfsCore *core.IpfsNode 
 	IpfsApi  iface.CoreAPI
 	CidVector Vector
-	VectorCache map[int]Vector
+	CidVectorStaging Vector 
+	StagingAKCs int
 	State NodeState
 }
 
@@ -165,10 +171,11 @@ func newIpfsNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 }
 
 // Connectar nó a peers
-func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) error {
+func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) (int,error) {
 
 	// Array para gerir nós desconectados	
-	unconnectedPeers := make(map[string]error)	
+	unconnectedPeers := make(map[string]error)
+	npeers := 0
 
 
 	if(len(peers) > 0){
@@ -200,6 +207,8 @@ func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) error {
 			if(err != nil){
 				err = fmt.Errorf("Conexão não foi possivel: %v\n",err)
 				unconnectedPeers[peerIdString] = err
+			} else {
+				npeers = npeers + 1
 			}
 
 		}
@@ -216,10 +225,10 @@ func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) error {
 			sb.WriteString(fmt.Sprintf(" - %s → %v\n", peerID, err))
 		}
 
-		return fmt.Errorf("%s",sb.String())
+		return npeers,fmt.Errorf("%s",sb.String())
 	}
 
-	return nil
+	return npeers,nil
 
 
 }
@@ -260,6 +269,7 @@ var LeaderFlag bool
 
 
 func Create(repoPath string,  peers []string) (*Node,error){
+	var npeers int
 
 	ipfsCore, err := newIpfsNode(context.Background(),repoPath);
 
@@ -275,37 +285,44 @@ func Create(repoPath string,  peers []string) (*Node,error){
 	}
 
 	if(peers != nil && cap(peers) > 0){
-		err = connectToPeers(ipfsCoreApi,peers,ipfsCore.Identity.String())
+		npeers,err = connectToPeers(ipfsCoreApi,peers,ipfsCore.Identity.String())
 	}
 
 	state := FOLLOWER
+	stagingACKs := -1
 
 	if(LeaderFlag){
 		state = LEADER
+		stagingACKs = 0
 	}
+
+	emptyVector := 
+		Vector {
+			Ver: 0,
+			Content: []string{},
+		}
 
 	n := Node {
 
 		IpfsCore : ipfsCore,
 		IpfsApi : ipfsCoreApi,
-		VectorCache: make(map[int]Vector),
-		CidVector: 
-			Vector {
-				Ver: 0,
-				Content: []string{},
-			},
+		CidVectorStaging: emptyVector,
+		StagingAKCs: stagingACKs,
+		CidVector: emptyVector,
 		State: state,
 
 	}
+
+	Npeers = npeers
 
 	return &n,err
 
 }
 
-// Funções auxiliares //
+// Metodos //
 
 // Upload de ficheiros
-func AddFile(nd *Node,fileBytes []byte) (path.ImmutablePath,error){
+func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath,error){
 
 
 	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -321,6 +338,190 @@ func AddFile(nd *Node,fileBytes []byte) (path.ImmutablePath,error){
 	return fileCid,err
 
 }
+
+func (nd *Node) Run(){
+
+	ctx,cancel := context.WithCancel(context.Background()) 
+	defer cancel()
+
+	switch nd.State {
+	case LEADER:
+	     liderRoutine(nd,ctx)
+	default:
+	     followerRoutine(nd,ctx)
+	}
+
+}
+
+// Follower
+
+func receiveNewVector(nd *Node,v Vector){
+
+	if(nd.CidVector.Ver < v.Ver && isSubset(nd.CidVector,v)){
+		fmt.Printf("Vetor recebido:\n%v\n",v.String())
+		fmt.Printf("Hash do vetor: %s\n",v.Hash())
+		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.ACK,messaging.AckMessage{Hash: v.Hash()})
+	}
+
+	nd.CidVectorStaging = v
+
+}
+
+func receiveCommit(nd *Node){
+	nd.CidVector = nd.CidVectorStaging
+}
+
+func followerRoutine(nd *Node,ctx context.Context){
+
+
+        fmt.Printf("A iniciar routina follower\n")
+
+	for {
+
+		select {
+
+		    case <-ctx.Done():
+			fmt.Printf("A terminar routina follower\n")
+			return
+		   
+		    default : 
+
+			err := messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any) {
+			    aemMsg,ok := msg.(messaging.AppendEntryMessage)
+			    if(!ok){
+				fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
+			    }
+			    fmt.Printf("Recebi AE message com vetor\n%v\n",aemMsg.Vector.String())
+			    receiveNewVector(nd,aemMsg.Vector)
+			})
+
+			if(err != nil){
+			    fmt.Printf("Erro ao escutar por AppendEntryMessage, %v\n",err) 
+			}
+
+			err = messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any) {
+			    receiveCommit(nd)
+			})
+
+
+			if(err != nil){
+			    fmt.Printf("Erro ao escutar por CommitMessage, %v\n",err) 
+			}
+
+
+		}
+
+	}
+
+
+
+}
+
+// Lider
+
+func receiveAck(nd *Node,hash string) (bool){
+
+	if(nd.CidVectorStaging.Hash() == hash){
+	    nd.StagingAKCs = nd.StagingAKCs + 1
+	}
+
+	fmt.Printf("Hash recebida %s\n",hash)
+	fmt.Printf("Hash do staging %s\n",nd.CidVectorStaging.Hash())
+
+	if(nd.StagingAKCs >= Npeers%2){
+	    nd.CidVector = nd.CidVectorStaging
+	    messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.COMM,messaging.CommitMessage{ Version: nd.CidVectorStaging.Ver })
+	}
+
+	return nd.CidVectorStaging.Hash() == hash
+}
+
+func liderRoutine(nd *Node,ctx context.Context){
+
+
+        fmt.Printf("A iniciar routina lider\n")
+
+	for {
+
+	    select {
+		case <-ctx.Done():
+
+			fmt.Printf("A terminar routina follower\n")
+			return
+
+		default:
+
+			err := messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
+			    ackmsg,ok := msg.(messaging.AckMessage)
+			    if(!ok){
+				fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
+			    }
+
+			    fmt.Printf("Recebi ACK de %v, com hash %v\n",sender,ackmsg.Hash)
+
+			    valid := receiveAck(nd,ackmsg.Hash)
+
+			    if(valid){
+			        fmt.Printf("Numeros de ACKs: %v/%v",nd.StagingAKCs,Npeers)  
+			    } else {
+				fmt.Printf("Vetor em staging atual:\n%v\n",nd.CidVectorStaging.String())
+			    	fmt.Printf("ACK hash não valida\n")
+			    }
+
+			    
+			})
+
+
+			if(err != nil){
+			    fmt.Printf("Erro ao escutar por ACKMessages, %v\n",err) 
+			}
+
+	    }
+
+
+	}
+
+}
+
+
+// Funções Auxiliares // 
+
+func isSubset(sub Vector, super Vector) bool {
+
+	var subArray []string
+	var superArray []string
+
+	subArray = sub.Content
+	superArray = super.Content
+
+	if(len(subArray) == 0){
+		return true
+	}
+
+	if(len(subArray) > len(superArray)){
+		return false
+	}
+
+	for i:=0;i<len(subArray);i++{
+
+		if(superArray[i]!=subArray[i]){
+			return false
+		}
+
+	}
+
+	return true
+}
+
+
+
+
+
+
+
+
+
+
 
 
 

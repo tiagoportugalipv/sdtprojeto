@@ -3,10 +3,10 @@ package filecontroller
 import (
 
 	// bibs padrão
+	"bufio"
+	"io"
+	"log"
 	"net/http"
-        "bufio"
-        "io"
-        "log"
 
 	// bibs externas
 	"github.com/gin-gonic/gin"
@@ -14,7 +14,7 @@ import (
 	// bibs internas
 	"projeto/node"
 	"projeto/services/embedding"
-        "projeto/services/messaging"
+	"projeto/services/messaging"
 )
 
 func UploadFile(ctx *gin.Context, nd *node.Node) {
@@ -73,7 +73,7 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
 
     uploadedFile.Close()
 
-    fileCid, err := node.AddFile(nd,fileBytes)
+    fileCid, err := nd.AddFile(fileBytes)
 
     if err != nil {
         ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao submeter ficheiro para o ipfs"})
@@ -86,14 +86,15 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
          Content: append(currentVector.Content,fileCid.String()),
     }
 
-    nd.VectorCache[newVector.Ver] = newVector
+    nd.CidVectorStaging = newVector
 
     msg := messaging.AppendEntryMessage{
             Vector: newVector,
             Embeddings: embs,
     }
 
-    err = messaging.PublishTo(nd,messaging.AEM,msg)
+
+    err = messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.AEM,msg)
 
     if(err != nil){
         log.Printf("Falha ao enviar estrutura: %v",err) 
@@ -103,5 +104,7 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
         "message": "File added successfully, CID : "+fileCid.String(),
         "filename": file.Filename,
         "cid": fileCid.String(),
+        "vetorHash": nd.CidVectorStaging.Hash(),
+        "vetor enviado" : nd.CidVectorStaging.String(),
     })
 }

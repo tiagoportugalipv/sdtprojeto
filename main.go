@@ -14,10 +14,8 @@ import (
 	"projeto/api"
 	"projeto/node"
 	"projeto/services/embedding"
-	"projeto/services/messaging"
 
 	// bibs externas
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func main() {
@@ -135,49 +133,54 @@ func main() {
 	// 	fmt.Printf("Cid: %v",fileCid)
 	// 	file.Close()
 
+	// Teste de funcionamento do PubSub
 
+	// if(leaderFlag){
+	//
+	//
+	// 	fmt.Printf("==>A correr Api na porta %d\n",apiPort)
+	//
+	// 	err := messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.TXT,messaging.TextMessage{Text: "Olá eu sou o lider"})
+	//
+	//
+	// 	if(err != nil){
+	// 		fmt.Printf("Mensagem não enviada com sucesso: v%\n",err)
+	// 	}
+	//
+	// 	err = api.Initialize(nd,apiPort)
+	//
+	// 	if(err != nil){
+	// 		fmt.Printf("Api não foi iniciada com sucesso\n")
+	// 	}
+	//
+	// } else {
+	//
+	//
+	// 	fmt.Printf("==>A ouvir mensagens\n")
+	//
+	// 	err = messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.TXT,func(sender peer.ID, msg any) {
+	//
+	// 		textMsg,ok := msg.(messaging.TextMessage)
+	//
+	// 		if(!ok){
+	// 			fmt.Printf("Esperado TextMessage, obtido %T", msg)
+	// 		}
+	//
+	// 		fmt.Println(textMsg.Text)
+	// 	})
+	//
+	//
+	// 	if(err != nil){
+	// 		fmt.Printf("Mensagem não recebida com sucesso: v%\n",err)
+	// 	}
+	//
+	// }
 
 	if(leaderFlag){
-
-
-		fmt.Printf("==>A correr Api na porta %d\n",apiPort)
-
-		err := messaging.PublishTo(nd,messaging.TXT,messaging.TextMessage{Text: "Olá eu sou o lider"})
-
-
-		if(err != nil){
-			fmt.Printf("Mensagem não enviada com sucesso: v%\n",err)
-		}
-
-		err = api.Initialize(nd,apiPort)
-
-		if(err != nil){
-			fmt.Printf("Api não foi iniciada com sucesso\n")
-		}
-
-	} else {
-
-
-		fmt.Printf("==>A ouvir mensagens\n")
-
-		err = messaging.ListenTo(nd,messaging.TXT,func(sender peer.ID, msg any) {
-
-			textMsg,ok := msg.(messaging.TextMessage)
-
-			if(!ok){
-				fmt.Printf("Esperado TextMessage, obtido %T", msg)
-			}
-
-			fmt.Println(textMsg.Text)
-		})
-
-
-		if(err != nil){
-			fmt.Printf("Mensagem não recebida com sucesso: v%\n",err)
-		}
-
-		select {}
+		go api.Initialize(nd,apiPort)
 	}
+
+	nd.Run()
 
 }
 
