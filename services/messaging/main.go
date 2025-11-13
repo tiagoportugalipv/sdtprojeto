@@ -2,15 +2,17 @@ package messaging
 
 import (
 	// bibs padrão
-	"fmt"
+	"bytes"
 	"context"
-    "bytes"
-    "encoding/gob"
+	"encoding/gob"
+	"fmt"
 	"time"
 
 	// bibs internas
 	"projeto/node"
 
+	// bibs externas
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // https://thesecretlivesofdata.com/raft/#replication
@@ -18,23 +20,18 @@ import (
 type Topico string
 
 const (
-	AEM Topico = "aem" // AppendEntryMessage 
-	TXT Topico = "txt"
+    AEM Topico = "aem" // AppendEntryMessage 
+    TXT Topico = "txt"
 )
 
-type Message struct {
-    From string 
-}
 
 type TextMessage struct {
-	Message
-	Text string 
+    Text string 
 }
 
 type AppendEntryMessage struct {
-	Message
-	Vector node.Vector 
-	Embeddings [][]float32 
+    Vector node.Vector 
+    Embeddings [][]float32 
 }
 
 func PublishTo(nd *node.Node, topico Topico, msg any)(error){
@@ -42,22 +39,72 @@ func PublishTo(nd *node.Node, topico Topico, msg any)(error){
     var err error
     buf := new(bytes.Buffer)
     encoder := gob.NewEncoder(buf)
-	pubsubInt := nd.IpfsApi.PubSub()
+    pubsubInt := nd.IpfsApi.PubSub()
 
     if err = encoder.Encode(msg); err != nil {
-        return fmt.Errorf("Falha a codificar mensagem: %v\n", err)
+        return fmt.Errorf("Falha ao dar marshall da mensagem: %v\n", err)
     }
 
 
-	publishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+    publishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
 
-	err = pubsubInt.Publish(publishCtx,string(topico),buf.Bytes())
+    err = pubsubInt.Publish(publishCtx,string(topico),buf.Bytes())
 
-	if err != nil {
-		return fmt.Errorf("Falha ao enviar mensagem: %v\n", err)
-	}
+    if err != nil {
+	return fmt.Errorf("Falha ao enviar mensagem: %v\n", err)
+    }
 
-	return nil
+    return nil
 
 }
+
+func ListenTo(nd *node.Node, topico Topico, callback func(sender peer.ID, msg any)) error {
+
+    pubsubInt := nd.IpfsApi.PubSub()
+
+    subscribeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    sub, err := pubsubInt.Subscribe(subscribeCtx, string(topico))
+    if err != nil {
+        return fmt.Errorf("Falha ao subscrever topico: %v", err)
+    }
+
+    for {
+        pubSubMsg, err := sub.Next(context.Background())
+        if err != nil {
+            return fmt.Errorf("Erro ao ouvir menssagens: %v", err)
+        }
+
+        buf := bytes.NewBuffer(pubSubMsg.Data())
+        decoder := gob.NewDecoder(buf)
+
+        var msg any
+        switch topico {
+        case TXT:
+            var txtMsg TextMessage
+            if err := decoder.Decode(&txtMsg); err != nil {
+                return fmt.Errorf("Erro ao decodificar TextMessage: %v", err)
+            }
+            msg = txtMsg
+        case AEM:
+            var aemMsg AppendEntryMessage
+            if err := decoder.Decode(&aemMsg); err != nil {
+                return fmt.Errorf("Erro ao decodificar AppendEntryMessage: %v", err)
+            }
+            msg = aemMsg
+        default:
+            return fmt.Errorf("Topico desconhecido: %v", topico)
+        }
+
+        callback(pubSubMsg.From(), msg)
+    }
+}
+
+
+
+
+
+
+

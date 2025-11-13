@@ -7,18 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 
 	// bibs internas
-	"projeto/node"
 	"projeto/api"
+	"projeto/node"
 	"projeto/services/embedding"
+	"projeto/services/messaging"
 
 	// bibs externas
-	
-	// bibs para upload test
-	//"io"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func main() {
@@ -137,16 +136,48 @@ func main() {
 	// 	file.Close()
 
 
-	fmt.Printf("==>A correr Api na porta %d\n",apiPort)
 
-	err = api.Initialize(nd,apiPort)
+	if(leaderFlag){
 
-	if(err != nil){
-		fmt.Printf("Api não foi iniciada com sucesso\n")
+
+		fmt.Printf("==>A correr Api na porta %d\n",apiPort)
+
+		err := messaging.PublishTo(nd,messaging.TXT,messaging.TextMessage{Text: "Olá eu sou o lider"})
+
+
+		if(err != nil){
+			fmt.Printf("Mensagem não enviada com sucesso: v%\n",err)
+		}
+
+		err = api.Initialize(nd,apiPort)
+
+		if(err != nil){
+			fmt.Printf("Api não foi iniciada com sucesso\n")
+		}
+
+	} else {
+
+
+		fmt.Printf("==>A ouvir mensagens\n")
+
+		err = messaging.ListenTo(nd,messaging.TXT,func(sender peer.ID, msg any) {
+
+			textMsg,ok := msg.(messaging.TextMessage)
+
+			if(!ok){
+				fmt.Printf("Esperado TextMessage, obtido %T", msg)
+			}
+
+			fmt.Println(textMsg.Text)
+		})
+
+
+		if(err != nil){
+			fmt.Printf("Mensagem não recebida com sucesso: v%\n",err)
+		}
+
+		select {}
 	}
-
-	
-
 
 }
 

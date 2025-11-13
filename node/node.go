@@ -165,7 +165,7 @@ func newIpfsNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 }
 
 // Connectar nó a peers
-func connectToPeers(ipfs iface.CoreAPI, peers []string) error {
+func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) error {
 
 	// Array para gerir nós desconectados	
 	unconnectedPeers := make(map[string]error)	
@@ -174,6 +174,10 @@ func connectToPeers(ipfs iface.CoreAPI, peers []string) error {
 	if(len(peers) > 0){
 
 		for _, peerIdString := range peers {
+
+			if(peerIdString == self){
+				continue
+			}
 
 			// Descodificar o CID
 			peerId, err := peer.Decode(peerIdString)
@@ -271,7 +275,7 @@ func Create(repoPath string,  peers []string) (*Node,error){
 	}
 
 	if(peers != nil && cap(peers) > 0){
-		err = connectToPeers(ipfsCoreApi,peers)
+		err = connectToPeers(ipfsCoreApi,peers,ipfsCore.Identity.String())
 	}
 
 	state := FOLLOWER

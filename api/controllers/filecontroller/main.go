@@ -19,10 +19,10 @@ import (
 
 func UploadFile(ctx *gin.Context, nd *node.Node) {
 
-    if(nd.State != node.LEADER){
-        ctx.JSON(http.StatusBadRequest, gin.H{"error": "Nó não lider"})
-        return
-    }
+    // if(nd.State != node.LEADER){
+    //     ctx.JSON(http.StatusBadRequest, gin.H{"error": "Nó não lider"})
+    //     return
+    // }
 
     file, err := ctx.FormFile("file")
     if err != nil || file == nil {
@@ -89,10 +89,6 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
     nd.VectorCache[newVector.Ver] = newVector
 
     msg := messaging.AppendEntryMessage{
-
-            Message: messaging.Message{
-                From: nd.IpfsCore.Identity.String(),
-            },
             Vector: newVector,
             Embeddings: embs,
     }
