@@ -20,14 +20,14 @@ sequenceDiagram
     Cliente-->>Lider: ficheiro
     Lider-->>Cliente: CID
 
-    Lider-->>Peer1: newVectorMessage
-    Lider-->>Peer2: newVectorMessage
-    Peer1-->>Lider: hashACK
-    Peer2-->>Lider: hashACK
+    Lider-->>Peer1: AppendEntryMessage
+    Lider-->>Peer2: AppendEntryMessage
+    Peer1-->>Lider: AckMessage
+    Peer2-->>Lider: AckMessage
 
     activate Lider
     Note left of Lider: Se os hash forem iguais em maioria de todos os peers
-    Lider->>Peer1: commitNewVectorVersion
-    Lider->>Peer2: commitNewVectorVersion
+    Lider->>Peer1: CommitMessage
+    Lider->>Peer2: CommitMessage
     deactivate Lider
 ```

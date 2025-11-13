@@ -409,14 +409,16 @@ func receiveAck(nd *Node,hash string) (bool){
 
 	if(nd.CidVectorStaging.Hash() == hash){
 	    nd.StagingAKCs = nd.StagingAKCs + 1
+		fmt.Printf("Numeros de ACKs: %v/%v\n",nd.StagingAKCs,Npeers)  
 	}
 
 	fmt.Printf("Hash recebida %s\n",hash)
 	fmt.Printf("Hash do staging %s\n",nd.CidVectorStaging.Hash())
 
-	if(nd.StagingAKCs >= Npeers%2){
+	if(nd.StagingAKCs >= int(Npeers/2)){
 	    nd.CidVector = nd.CidVectorStaging
 	    messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.COMM,messaging.CommitMessage{ Version: nd.CidVectorStaging.Ver })
+		nd.StagingAKCs = 0
 	}
 
 	return nd.CidVectorStaging.Hash() == hash
@@ -425,7 +427,7 @@ func receiveAck(nd *Node,hash string) (bool){
 func liderRoutine(nd *Node,ctx context.Context){
 
 
-        fmt.Printf("A iniciar routina lider\n")
+    fmt.Printf("A iniciar routina lider\n")
 
 	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
 	    ackmsg,ok := msg.(messaging.AckMessage)
@@ -437,11 +439,10 @@ func liderRoutine(nd *Node,ctx context.Context){
 
 	    valid := receiveAck(nd,ackmsg.Hash)
 
-	    if(valid){
-		fmt.Printf("Numeros de ACKs: %v/%v",nd.StagingAKCs,Npeers)  
-	    } else {
-		fmt.Printf("Vetor em staging atual:\n%v\n",nd.CidVectorStaging.String())
-		fmt.Printf("ACK hash não valida\n")
+	    if(!valid){
+			fmt.Printf("Numeros de ACKs: %v/%v",nd.StagingAKCs,Npeers)  
+			fmt.Printf("Vetor em staging atual:\n%v\n",nd.CidVectorStaging.String())
+			fmt.Printf("ACK hash não valida\n")
 	    }
 
 		    

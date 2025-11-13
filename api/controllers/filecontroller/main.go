@@ -15,7 +15,7 @@ import (
 	"projeto/node"
 	"projeto/services/embedding"
 	"projeto/services/messaging"
-        "projeto/types"
+        // "projeto/types"
 )
 
 func UploadFile(ctx *gin.Context, nd *node.Node) {
