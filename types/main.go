@@ -8,9 +8,6 @@ import (
 	"strings"
 )
 
-// Flags
-
-var UploadCompleted = false
 
 // Estruturas Base
 
