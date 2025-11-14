@@ -365,7 +365,7 @@ func receiveNewVector(nd *Node,v Vector, embs [][]float32){
 	if(nd.CidVector.Ver < v.Ver && isSubset(nd.CidVector,v)){
 		fmt.Printf("Vetor recebido:\n%v\n",v.String())
 		fmt.Printf("Hash do vetor: %s\n",v.Hash())
-		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.ACK,messaging.AckMessage{Hash: v.Hash()})
+		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.ACK,messaging.AckMessage{Hash: nd.CidVector.Hash()})
 	}
 
 	nd.CidVectorStaging = v
@@ -408,7 +408,7 @@ func followerRoutine(nd *Node,ctx context.Context){
 
 func receiveAck(nd *Node,hash string) (bool){
 
-	if(nd.CidVectorStaging.Hash() == hash){
+	if(nd.CidVector.Hash() == hash){
 	    nd.StagingAKCs = nd.StagingAKCs + 1
 		fmt.Printf("Numeros de ACKs: %v/%v\n",nd.StagingAKCs,Npeers)  
 	}
