@@ -1,30 +1,43 @@
 package embedding
 
 import (
-	"fmt"
-
-	"github.com/knights-analytics/hugot"
+    "fmt"
+    "os"
+    "path/filepath"
+    "github.com/knights-analytics/hugot"
 )
 
 var ModelDirPath string
 var ModelPath string
 
-func SetUpModel() (error,string){
-
+func SetUpModel() (error, string) {
     var err error
     
+    localModelPath := filepath.Join(ModelDirPath, "all-MiniLM-L6-v2")
+    ModelPath = filepath.Join(localModelPath, "onnx", "model.onnx")
+    
+    if _, err := os.Stat(ModelPath); err == nil {
+        fmt.Printf("✓ Modelo encontrado localmente: %s\n", ModelPath)
+        return nil, ModelPath  
+    }
+    
+    fmt.Println("⚠ Modelo não encontrado. A fazer download...")
     downloadOptions := hugot.NewDownloadOptions()
     downloadOptions.OnnxFilePath = "onnx/model.onnx"
-
-    ModelPath,err = hugot.DownloadModel(
+    
+    ModelPath, err = hugot.DownloadModel(
         "sentence-transformers/all-MiniLM-L6-v2",
         ModelDirPath,
         downloadOptions,
-    ) 
-
-    return err,ModelPath
-
+    )
+    
+    if err != nil {
+        return fmt.Errorf("Erro ao fazer download: %v", err), ""
+    }
+    
+    return nil, ModelPath
 }
+
 
 
 
@@ -68,6 +81,4 @@ func GetEmbeddings(fileLines []string)([][]float32,error){
 
     return embeddings, nil
 
-}
-
-
+} 
