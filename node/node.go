@@ -59,10 +59,12 @@ type Node struct {
 	IpfsCore *core.IpfsNode 
 	IpfsApi  iface.CoreAPI
 	CidVector Vector
-	CidVectorStaging Vector 
+	VectorCache map[int]Vector
 	EmbsStaging [][]float32
-	StagingAKCs int
 	State NodeState // Estado do nó
+
+	// Lider Stuff
+	StagingAKCs map[int]int
 	CommitDone chan struct{} // Para depois sinalizar a api para responder ao cliente depois dos COMMITACK
 }
 
@@ -292,11 +294,9 @@ func Create(repoPath string,  peers []string) (*Node,error){
 	}
 
 	state := FOLLOWER
-	stagingACKs := -1
 
 	if(LeaderFlag){
 		state = LEADER
-		stagingACKs = 0
 	}
 
 	emptyVector := 
@@ -309,12 +309,16 @@ func Create(repoPath string,  peers []string) (*Node,error){
 
 		IpfsCore : ipfsCore,
 		IpfsApi : ipfsCoreApi,
-		CidVectorStaging: emptyVector,
+		VectorCache: make(map[int]Vector),
 		EmbsStaging: [][]float32{},
-		StagingAKCs: stagingACKs,
 		CidVector: emptyVector,
 		State: state,
-		CommitDone: make(chan struct{}),
+
+	}
+
+	if(LeaderFlag){
+		n.CommitDone = make(chan struct{})
+		n.StagingAKCs = make(map[int]int)
 
 	}
 
@@ -365,22 +369,31 @@ func receiveNewVector(nd *Node,v Vector, embs [][]float32){
 	if(nd.CidVector.Ver < v.Ver && isSubset(nd.CidVector,v)){
 		fmt.Printf("Vetor recebido:\n%v\n",v.String())
 		fmt.Printf("Hash do vetor: %s\n",v.Hash())
-		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.ACK,messaging.AckMessage{Hash: nd.CidVector.Hash()})
+		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.ACK,messaging.AckMessage{Version: v.Ver,Hash: nd.CidVector.Hash()})
 	}
 
-	nd.CidVectorStaging = v
+	nd.VectorCache[v.Ver] = v
 	nd.EmbsStaging = embs
 
 }
 
-func receiveCommit(nd *Node){
-	nd.CidVector = nd.CidVectorStaging
+func receiveCommit(nd *Node, version int){
+
+	nd.CidVector = nd.VectorCache[version]
+
+	for k := range nd.VectorCache {
+
+		if k <= version {
+			delete(nd.VectorCache,k)
+		}
+
+	}
 }
 
 func followerRoutine(nd *Node,ctx context.Context){
 
 
-        fmt.Printf("A iniciar routina follower\n")
+    fmt.Printf("A iniciar routina follower\n")
 
 	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any) {
 	    aemMsg,ok := msg.(messaging.AppendEntryMessage)
@@ -394,7 +407,11 @@ func followerRoutine(nd *Node,ctx context.Context){
 	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any) { 
 		fmt.Printf("Mensagem de commit recebida\n")
 		fmt.Printf("Vetor atual :\n%v\n",nd.CidVector.String())
-		receiveCommit(nd) 
+	    commMgs,ok := msg.(messaging.CommitMessage)
+	    if(!ok){
+			fmt.Printf("Esperado CommitMessage, obtido %T", msg)
+	    }
+		receiveCommit(nd,commMgs.Version) 
 		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
 	})
 
@@ -406,23 +423,34 @@ func followerRoutine(nd *Node,ctx context.Context){
 
 // Lider
 
-func receiveAck(nd *Node,hash string) (bool){
+func receiveAck(nd *Node,hash string,version int) (bool){
 
-	if(nd.CidVector.Hash() == hash){
-	    nd.StagingAKCs = nd.StagingAKCs + 1
-		fmt.Printf("Numeros de ACKs: %v/%v\n",nd.StagingAKCs,Npeers)  
+	valid := nd.CidVector.Hash() == hash;
+
+	if(valid){
+		nd.StagingAKCs[version] = nd.StagingAKCs[version] + 1
+		fmt.Printf("Numeros de ACKs para a versao %v: %v/%v\n",version,nd.StagingAKCs[version],Npeers)  
 	}
 
 	fmt.Printf("Hash recebida %s\n",hash)
-	fmt.Printf("Hash do staging %s\n",nd.CidVectorStaging.Hash())
+	fmt.Printf("Hash do vetor atual %s\n",nd.CidVector.Hash())
 
-	if(nd.StagingAKCs >= int(Npeers/2)){
-	    nd.CidVector = nd.CidVectorStaging
-	    messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.COMM,messaging.CommitMessage{ Version: nd.CidVectorStaging.Ver })
-		nd.StagingAKCs = 0
+	if(nd.StagingAKCs[version] >= int(Npeers/2)){
+
+	    nd.CidVector = nd.VectorCache[version]
+	    messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.COMM,messaging.CommitMessage{ Version: version })
+
+		for k := range nd.VectorCache {
+
+			if k <= version {
+				delete(nd.StagingAKCs,k)
+				delete(nd.VectorCache,k)
+			}
+
+		}
 	}
 
-	return nd.CidVectorStaging.Hash() == hash
+	return valid
 }
 
 func liderRoutine(nd *Node,ctx context.Context){
@@ -433,16 +461,15 @@ func liderRoutine(nd *Node,ctx context.Context){
 	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
 	    ackmsg,ok := msg.(messaging.AckMessage)
 	    if(!ok){
-		fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
+			fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
 	    }
 
 	    fmt.Printf("Recebi ACK de %v, com hash %v\n",sender,ackmsg.Hash)
 
-	    valid := receiveAck(nd,ackmsg.Hash)
+	    valid := receiveAck(nd,ackmsg.Hash,ackmsg.Version)
 
 	    if(!valid){
-			fmt.Printf("Numeros de ACKs: %v/%v",nd.StagingAKCs,Npeers)  
-			fmt.Printf("Vetor em staging atual:\n%v\n",nd.CidVectorStaging.String())
+			fmt.Printf("Vetor atual hash:\n%v\n",nd.CidVector.String())
 			fmt.Printf("ACK hash não valida\n")
 	    }
 

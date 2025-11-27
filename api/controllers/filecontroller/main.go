@@ -82,18 +82,27 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
     }
 
     currentVector := nd.CidVector
+    newVersion := 0;
+
+    for k := range(nd.VectorCache){
+        if(k > newVersion){
+            newVersion = k
+        }
+    }
+
+    newVersion = newVersion + 1 
+
     newVector := node.Vector {
-         Ver: currentVector.Ver + 1,
+         Ver: newVersion,
          Content: append(currentVector.Content,fileCid.String()),
     }
 
-    nd.CidVectorStaging = newVector
+    nd.VectorCache[newVersion] = newVector
 
     msg := messaging.AppendEntryMessage{
             Vector: newVector,
             Embeddings: embs,
     }
-
 
     err = messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.AEM,msg)
 

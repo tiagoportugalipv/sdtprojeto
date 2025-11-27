@@ -35,6 +35,7 @@ type TextMessage struct {
 
 
 type AckMessage struct {
+    Version int
     Hash string 
 }
 

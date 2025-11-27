@@ -4,56 +4,56 @@ import (
     "fmt"
     "os"
     "path/filepath"
+
     "github.com/knights-analytics/hugot"
 )
 
 var ModelDirPath string
 var ModelPath string
 
+// SetUpModel verifica se o modelo existe localmente; caso contrário, faz download.
 func SetUpModel() (error, string) {
-    var err error
-    
-    localModelPath := filepath.Join(ModelDirPath, "all-MiniLM-L6-v2")
-    ModelPath = filepath.Join(localModelPath, "onnx", "model.onnx")
-    
+    ModelPath = filepath.Join(
+        ModelDirPath,
+        "sentence-transformers_all-MiniLM-L6-v2",
+        "onnx",
+        "model.onnx",
+    )
+
+    // Verifica se o modelo já existe
     if _, err := os.Stat(ModelPath); err == nil {
-        fmt.Printf("✓ Modelo encontrado localmente: %s\n", ModelPath)
-        return nil, ModelPath  
+        return nil, ModelPath
     }
-    
-    fmt.Println("⚠ Modelo não encontrado. A fazer download...")
+
+    // Caso não exista, faz download
     downloadOptions := hugot.NewDownloadOptions()
     downloadOptions.OnnxFilePath = "onnx/model.onnx"
-    
-    ModelPath, err = hugot.DownloadModel(
+
+    downloadedPath, err := hugot.DownloadModel(
         "sentence-transformers/all-MiniLM-L6-v2",
         ModelDirPath,
         downloadOptions,
     )
-    
     if err != nil {
         return fmt.Errorf("Erro ao fazer download: %v", err), ""
     }
-    
+
+    ModelPath = downloadedPath
     return nil, ModelPath
 }
 
 
-
-
-func GetEmbeddings(fileLines []string)([][]float32,error){
-
+// GetEmbeddings gera embeddings para um conjunto de strings.
+func GetEmbeddings(fileLines []string) ([][]float32, error) {
     if len(fileLines) == 0 {
         return nil, fmt.Errorf("input fileLines is empty, cannot generate embeddings")
     }
 
     session, err := hugot.NewGoSession()
-
     if err != nil {
-        err = fmt.Errorf("Falha a obter sessão go para hugot : %v\n",err) 
-        return nil,err
+        return nil, fmt.Errorf("Falha a obter sessão go para hugot: %v", err)
     }
-
+    defer session.Destroy()
 
     config := hugot.FeatureExtractionConfig{
         ModelPath: ModelPath,
@@ -61,24 +61,17 @@ func GetEmbeddings(fileLines []string)([][]float32,error){
     }
 
     embeddingPipeline, err := hugot.NewPipeline(session, config)
-
-    if(err != nil){
-        err = fmt.Errorf("Falha ao criar embedding pipeline : %v\n",err) 
-        return nil,err
+    if err != nil {
+        return nil, fmt.Errorf(
+            "Falha ao criar embedding pipeline: %v\nCaminho para o modelo: %v",
+            err, ModelPath,
+        )
     }
 
-    pipelineResults,err := embeddingPipeline.RunPipeline(fileLines)
-
-
-    if(err != nil){
-        err = fmt.Errorf("Falha ao gerar embeddings : %v\n",err) 
-        return nil,err
+    results, err := embeddingPipeline.RunPipeline(fileLines)
+    if err != nil {
+        return nil, fmt.Errorf("Falha ao gerar embeddings: %v", err)
     }
 
-    embeddings := pipelineResults.Embeddings
-
-    session.Destroy()
-
-    return embeddings, nil
-
-} 
+    return results.Embeddings, nil
+}
