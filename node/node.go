@@ -317,6 +317,7 @@ func Create(repoPath string,  peers []string) (*Node,error){
 	}
 
 	if(LeaderFlag){
+
 		n.CommitDone = make(chan struct{})
 		n.StagingAKCs = make(map[int]int)
 
@@ -415,6 +416,18 @@ func followerRoutine(nd *Node,ctx context.Context){
 		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
 	})
 
+	// TODO Alterar para depois acomodar o processo de eleicao
+	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.HTB,func(sender peer.ID, msg any) { 
+
+		htbmsg,ok := msg.(messaging.HeartBeatMessage)
+	    if(!ok){
+			fmt.Printf("Esperado CommitMessage, obtido %T", msg)
+	    }
+
+		Npeers = htbmsg.Npeers 
+		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.IALV,messaging.IAmAliveMessage{})
+	})
+
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()
         fmt.Printf("A terminar rotina follower\n")
@@ -435,6 +448,21 @@ func receiveAck(nd *Node,hash string,version int) (bool){
 	fmt.Printf("Hash recebida %s\n",hash)
 	fmt.Printf("Hash do vetor atual %s\n",nd.CidVector.Hash())
 
+	// Encontrar numero de peers com swarm (Dá numeros estupidos)
+
+
+	// findPeersContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// defer cancel()
+	//
+	// sw := nd.IpfsApi.Swarm()
+	// n,err := sw.Peers(findPeersContext)
+	//
+	// if(err != nil){
+	// 	fmt.Printf("Um erro ocurreu á procura dos peers : %v \n",err)
+	// }
+	//
+	// fmt.Printf("Swarm diz que estamos conectados com %v\n", n)
+
 	if(nd.StagingAKCs[version] >= int(Npeers/2)){
 
 	    nd.CidVector = nd.VectorCache[version]
@@ -453,10 +481,43 @@ func receiveAck(nd *Node,hash string,version int) (bool){
 	return valid
 }
 
+func heartBeatSender(nd *Node, AlivePeers map[peer.ID]time.Time){
+
+	// A primeira vez é corrida sem atualizar o numero de peers de modo a dar tempo para os peers preencherem o 
+	// mapa
+
+	messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.HTB,messaging.HeartBeatMessage{Npeers : Npeers})
+	time.Sleep(15 * time.Second)
+
+	for {
+		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.HTB,messaging.HeartBeatMessage{Npeers : Npeers})
+		time.Sleep(15 * time.Second)
+
+		for peer, tms := range AlivePeers {
+
+			currentTime := time.Now()
+			timeSinceLastIamAlive := currentTime.Sub(tms)
+
+			if(timeSinceLastIamAlive >= (45 * time.Second)){
+				delete(AlivePeers,peer)
+			}
+
+		}
+
+		Npeers = len(AlivePeers)
+		fmt.Printf("Npeers Atualizado para %v\n",Npeers)
+	}
+
+}
+
 func liderRoutine(nd *Node,ctx context.Context){
 
 
     fmt.Printf("A iniciar routina lider\n")
+
+	AlivePeers := make(map[peer.ID]time.Time) // Timestamp of last IamAliveMsg
+
+	go heartBeatSender(nd,AlivePeers)
 
 	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
 	    ackmsg,ok := msg.(messaging.AckMessage)
@@ -472,7 +533,19 @@ func liderRoutine(nd *Node,ctx context.Context){
 			fmt.Printf("Vetor atual hash:\n%v\n",nd.CidVector.String())
 			fmt.Printf("ACK hash não valida\n")
 	    }
+		    
+	})
 
+
+	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.IALV,func(sender peer.ID, msg any) {
+
+	    _,ok := msg.(messaging.IAmAliveMessage)
+
+	    if(!ok){
+			fmt.Printf("Esperado IamAliveMessage, obtido %T", msg)
+	    }
+
+		AlivePeers[sender] = time.Now()
 		    
 	})
 
