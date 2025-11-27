@@ -99,7 +99,6 @@ func newIpfsRepo(repoPath string) (error) {
 	cfg.Pubsub.Enabled=1
 	cfg.Ipns.UsePubsub=1
 
-
 	if err != nil {
 		err = fmt.Errorf("Falha ao criar configuração: %v\n",err)
 		return err
@@ -391,8 +390,28 @@ func receiveCommit(nd *Node, version int){
 	}
 }
 
+
+//func heartBeatCheck(nd *Node){
+func heartBeatCheck(lastLiderHeartBeat *time.Time){
+
+
+	for {
+
+		if(time.Since(*lastLiderHeartBeat) >= (30*time.Second)){
+			fmt.Println("O lider falhou vamos a eleição")
+			//TODO passar para rotina de eleicao
+		}
+
+		time.Sleep(15 * time.Second)
+
+	}
+
+}
+
 func followerRoutine(nd *Node,ctx context.Context){
 
+	// Assumimos o primeiro beat na rotina follower
+	lastLiderHeartBeat := time.Now().Add(15 * time.Second)
 
     fmt.Printf("A iniciar routina follower\n")
 
@@ -421,12 +440,16 @@ func followerRoutine(nd *Node,ctx context.Context){
 
 		htbmsg,ok := msg.(messaging.HeartBeatMessage)
 	    if(!ok){
-			fmt.Printf("Esperado CommitMessage, obtido %T", msg)
+			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
 	    }
+
+		lastLiderHeartBeat = time.Now()
 
 		Npeers = htbmsg.Npeers 
 		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.IALV,messaging.IAmAliveMessage{})
 	})
+
+	go heartBeatCheck(&lastLiderHeartBeat)
 
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()
@@ -490,6 +513,7 @@ func heartBeatSender(nd *Node, AlivePeers map[peer.ID]time.Time){
 	time.Sleep(15 * time.Second)
 
 	for {
+
 		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.HTB,messaging.HeartBeatMessage{Npeers : Npeers})
 		time.Sleep(15 * time.Second)
 
