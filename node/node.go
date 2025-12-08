@@ -59,8 +59,8 @@ type Node struct {
 	IpfsCore *core.IpfsNode 
 	IpfsApi  iface.CoreAPI
 	CidVector Vector
-	VectorCache map[int]Vector
-	EmbsStaging [][]float32
+	VectorCache map[int](Vector)
+	EmbsStaging map[string]([][]float32)
 	State NodeState // Estado do nó
 
 	// Lider Stuff
@@ -309,7 +309,7 @@ func Create(repoPath string,  peers []string) (*Node,error){
 		IpfsCore : ipfsCore,
 		IpfsApi : ipfsCoreApi,
 		VectorCache: make(map[int]Vector),
-		EmbsStaging: [][]float32{},
+		EmbsStaging: make(map[string]([][]float32)),
 		CidVector: emptyVector,
 		State: state,
 
@@ -373,7 +373,7 @@ func receiveNewVector(nd *Node,v Vector, embs [][]float32){
 	}
 
 	nd.VectorCache[v.Ver] = v
-	nd.EmbsStaging = embs
+	nd.EmbsStaging[v.Content[len(v.Content)-1]] = embs
 
 }
 
