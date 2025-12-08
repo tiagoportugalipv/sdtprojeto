@@ -2,6 +2,7 @@ VMs
 */VMs
 .env
 .ipfs
+.local
 peers.txt
 models/*
 go.sum
