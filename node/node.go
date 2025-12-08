@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 
 	// "log"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	// bibs internas
+	"projeto/services/embedding"
 	"projeto/services/messaging"
 	"projeto/types"
 
@@ -31,6 +33,7 @@ import (
 	"github.com/ipfs/kubo/repo/fsrepo"
 	"github.com/libp2p/go-libp2p/core/peer"
 
+	faiss "github.com/DataIntelligenceCrew/go-faiss"
 	iface "github.com/ipfs/kubo/core/coreiface"
 	ifaceOptions "github.com/ipfs/kubo/core/coreiface/options"
 )
@@ -59,8 +62,10 @@ type Node struct {
 	IpfsCore *core.IpfsNode 
 	IpfsApi  iface.CoreAPI
 	CidVector Vector
+	CidVectorEmbs map[string]([]float32)
+	SearchIndex	*faiss.IndexFlat 
 	VectorCache map[int](Vector)
-	EmbsStaging map[string]([][]float32)
+	EmbsStaging map[string]([]float32)
 	State NodeState // Estado do nó
 
 	// Lider Stuff
@@ -309,17 +314,30 @@ func Create(repoPath string,  peers []string) (*Node,error){
 		IpfsCore : ipfsCore,
 		IpfsApi : ipfsCoreApi,
 		VectorCache: make(map[int]Vector),
-		EmbsStaging: make(map[string]([][]float32)),
+		EmbsStaging: make(map[string]([]float32)),
 		CidVector: emptyVector,
+		CidVectorEmbs: make(map[string]([]float32)),
 		State: state,
 
 	}
 
 	if(LeaderFlag){
 
+
 		n.CommitDone = make(chan struct{})
 		n.StagingAKCs = make(map[int]int)
+		
 
+	}
+
+
+	var faissErr error
+
+	n.SearchIndex,faissErr = faiss.NewIndexFlatL2(embedding.VECTORDIMS) 
+
+	if(faissErr != nil){
+		faissErr = fmt.Errorf("Erro ao criar index para o lider : \n%v", err)
+		return nil,faissErr
 	}
 
 	Npeers = npeers
@@ -353,6 +371,48 @@ func (nd *Node) Run(){
 	ctx,cancel := context.WithCancel(context.Background()) 
 	defer cancel()
 
+	//
+	// go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.RBLQ,func(sender peer.ID, msg any, stop *bool) { 
+	//
+	// 	fmt.Printf("Recebi mensagem para dar rebuild ao peer %v\n\n",sender)
+	//
+	// 	rblqmsg,ok := msg.(messaging.RebuildQueryMessage)
+	//     if(!ok){
+	// 		fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
+	//     }
+	//
+	// 	if(rblqmsg.Dest == nd.IpfsCore.Identity && sender != nd.IpfsCore.Identity){
+	//
+	//
+	// 		fmt.Printf("Vou ajudar a dar rebuild ao peer %v\n\n",sender)
+	//
+	// 		response := make(map[string][]float32)
+	//
+	// 		if(len(rblqmsg.Info) == 0){
+	//
+	// 			go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.RBLR,messaging.RebuildResponseMessage{Response:nd.CidVectorEmbs, Dest: sender, Total:true})
+	// 			return
+	//
+	// 		}
+	//
+	// 		for _,cid := range rblqmsg.Info {
+	//
+	// 			emb,exists := nd.CidVectorEmbs[cid]
+	//
+	// 			if(exists){
+	// 				response[cid] = emb
+	// 			} 
+	// 		}
+	//
+	//
+	// 		go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.RBLR,messaging.RebuildResponseMessage{Response:response, Dest: sender, Total:false})
+	// 		return
+	//
+	// 	}
+	//
+	// })
+	//
+
 	switch nd.State {
 	case LEADER:
 	     liderRoutine(nd,ctx)
@@ -364,7 +424,7 @@ func (nd *Node) Run(){
 
 // Follower
 
-func receiveNewVector(nd *Node,v Vector, embs [][]float32){
+func receiveNewVector(nd *Node,v Vector, embs []float32){
 
 	if(nd.CidVector.Ver < v.Ver && isSubset(nd.CidVector,v)){
 		fmt.Printf("Vetor recebido:\n%v\n",v.String())
@@ -388,6 +448,24 @@ func receiveCommit(nd *Node, version int){
 		}
 
 	}
+
+	// for _,cid := range nd.CidVector.Content {
+	//
+	// 	emb,emb_exists := nd.EmbsStaging[cid]
+	//
+	// 	if(emb_exists){
+	//
+	// 		nd.SearchIndex.Add(emb)
+	// 		nd.CidVectorEmbs[cid] = emb
+	// 		delete(nd.EmbsStaging,cid)
+	//
+	// 	} else {
+	//
+	// 		//TODO ask a random peer for it
+	//
+	// 	}
+	//
+	// }
 }
 
 
@@ -408,6 +486,39 @@ func heartBeatCheck(lastLiderHeartBeat *time.Time){
 
 }
 
+
+// func joinSender(nd *Node, ctx context.Context) {
+//
+//     for {
+//         select {
+// 			case <-ctx.Done():
+// 				fmt.Printf("A parar envio de joins\n")
+// 				return
+// 			case <-time.After(15 * time.Second):
+// 				messaging.PublishTo(
+// 					nd.IpfsApi.PubSub(),
+// 					messaging.JOIN,
+// 					messaging.JoinMessage{},
+// 				)
+//         }
+//     }
+// }
+
+
+func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID, error) {
+    ps := nd.IpfsApi.PubSub()
+
+    peers, err := ps.Peers(ctx, ifaceOptions.PubSub.Topic(topic))
+    if err != nil {
+		err = fmt.Errorf("Erro ao procurar peers do pubsub para o tópico %s: %v\n", topic, err)
+        return nd.IpfsCore.Identity,err 
+    }
+
+	idx := rand.Intn(len(peers)) 
+
+    return peers[idx],nil
+}
+
 func followerRoutine(nd *Node,ctx context.Context){
 
 	// Assumimos o primeiro beat na rotina follower
@@ -415,28 +526,8 @@ func followerRoutine(nd *Node,ctx context.Context){
 
     fmt.Printf("A iniciar routina follower\n")
 
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any) {
-	    aemMsg,ok := msg.(messaging.AppendEntryMessage)
-	    if(!ok){
-	        fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
-	    }
-	    fmt.Printf("Recebi AE message com vetor\n%v\n",aemMsg.Vector.String())
-	    receiveNewVector(nd,aemMsg.Vector,aemMsg.Embeddings)
-	})
-
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any) { 
-		fmt.Printf("Mensagem de commit recebida\n")
-		fmt.Printf("Vetor atual :\n%v\n",nd.CidVector.String())
-	    commMgs,ok := msg.(messaging.CommitMessage)
-	    if(!ok){
-			fmt.Printf("Esperado CommitMessage, obtido %T", msg)
-	    }
-		receiveCommit(nd,commMgs.Version) 
-		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
-	})
-
 	// TODO Alterar para depois acomodar o processo de eleicao
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.HTB,func(sender peer.ID, msg any) { 
+	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.HTB,func(sender peer.ID, msg any, stop *bool) { 
 
 		htbmsg,ok := msg.(messaging.HeartBeatMessage)
 	    if(!ok){
@@ -449,6 +540,82 @@ func followerRoutine(nd *Node,ctx context.Context){
 	})
 
 	go heartBeatCheck(&lastLiderHeartBeat)
+
+
+ //    rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// randomPeer,error := nd.getPubSubRandomPeer(rpeerctx,string(messaging.RBLQ))
+ //    cancel()
+	//
+	// if(error == nil){
+	//
+	//
+	// 	fmt.Printf("Entrei agora na rede vou pedir rebuild ao peer %v\n\n",randomPeer)
+	//
+	// 	go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.RBLQ,messaging.RebuildQueryMessage{
+	// 		Dest: randomPeer,
+	// 		Info: []string{},
+	// 	})
+	//
+	// }
+	//
+	//
+	// go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.RBLR,func(sender peer.ID, msg any, stop *bool) { 
+	//
+	//
+	// 	fmt.Printf("Recebi resposta de rebuild do peer %v\n\n",sender)
+	//
+	// 	rblrmsg,ok := msg.(messaging.RebuildResponseMessage)
+	//     if(!ok){
+	// 		fmt.Printf("Esperado rebuildResponseMessage, obtido %T", rblrmsg)
+	//     }
+	//
+	// 	if(rblrmsg.Dest == nd.IpfsCore.Identity){
+	//
+	//
+	// 		fmt.Printf("O destinatario sou eu vou dar rebuild\n\n")
+	//
+	// 		for cid,emb := range rblrmsg.Response {
+	//
+	//
+	// 			if(rblrmsg.Total){
+	//
+	// 				nd.CidVector.Content = append(nd.CidVector.Content, cid)
+	// 			}
+	//
+	// 			nd.CidVectorEmbs[cid] = emb
+	// 			nd.SearchIndex.Add(emb)
+	//
+	// 		}
+	//
+	//
+	// 		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
+	//
+	//
+	// 	}
+	//
+	// })
+
+
+	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any, stop *bool) {
+	    aemMsg,ok := msg.(messaging.AppendEntryMessage)
+	    if(!ok){
+	        fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
+	    }
+	    fmt.Printf("Recebi AE message com vetor\n%v\n",aemMsg.Vector.String())
+	    receiveNewVector(nd,aemMsg.Vector,aemMsg.Embeddings)
+	})
+
+	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any, stop *bool) { 
+		fmt.Printf("Mensagem de commit recebida\n")
+		fmt.Printf("Vetor atual :\n%v\n",nd.CidVector.String())
+	    commMgs,ok := msg.(messaging.CommitMessage)
+	    if(!ok){
+			fmt.Printf("Esperado CommitMessage, obtido %T", msg)
+	    }
+		receiveCommit(nd,commMgs.Version) 
+		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
+	})
+
 
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()
@@ -470,20 +637,6 @@ func receiveAck(nd *Node,hash string,version int) (bool){
 	fmt.Printf("Hash recebida %s\n",hash)
 	fmt.Printf("Hash do vetor atual %s\n",nd.CidVector.Hash())
 
-	// Encontrar numero de peers com swarm (Dá numeros estupidos)
-
-
-	// findPeersContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	// defer cancel()
-	//
-	// sw := nd.IpfsApi.Swarm()
-	// n,err := sw.Peers(findPeersContext)
-	//
-	// if(err != nil){
-	// 	fmt.Printf("Um erro ocurreu á procura dos peers : %v \n",err)
-	// }
-	//
-	// fmt.Printf("Swarm diz que estamos conectados com %v\n", n)
 
 	if(nd.StagingAKCs[version] >= int(Npeers/2)){
 
@@ -498,6 +651,19 @@ func receiveAck(nd *Node,hash string,version int) (bool){
 			}
 
 		}
+		//
+		// for _,cid := range nd.CidVector.Content {
+		//
+		// 	emb,emb_exists := nd.EmbsStaging[cid]
+		//
+		// 	if(emb_exists){
+		//
+		// 		nd.SearchIndex.Add(emb)
+		// 		nd.CidVectorEmbs[cid] = emb
+		// 		delete(nd.EmbsStaging,cid)
+		//
+		// 	}
+		// }
 	}
 
 	return valid
@@ -548,7 +714,7 @@ func liderRoutine(nd *Node,ctx context.Context){
 
 	go heartBeatSender(nd)
 
-	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any) {
+	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any, stop *bool) {
 	    ackmsg,ok := msg.(messaging.AckMessage)
 	    if(!ok){
 			fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
@@ -564,7 +730,6 @@ func liderRoutine(nd *Node,ctx context.Context){
 	    }
 		    
 	})
-
 
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()

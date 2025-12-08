@@ -4,12 +4,12 @@ import (
     "fmt"
     "os"
     "path/filepath"
-
     "github.com/knights-analytics/hugot"
 )
 
 var ModelDirPath string
 var ModelPath string
+const VECTORDIMS = 384
 
 // SetUpModel verifica se o modelo existe localmente; caso contrário, faz download.
 func SetUpModel() (error, string) {
@@ -45,7 +45,7 @@ func SetUpModel() (error, string) {
 
 // GetEmbeddings gera embeddings para um conjunto de strings.
 //TODO: Mudar para um array com uma unica string 
-func GetEmbeddings(file []string) ([][]float32, error) {
+func GetEmbeddings(file string) ([]float32, error) {
 
     if len(file) == 0 {
         return nil, fmt.Errorf("input fileLines is empty, cannot generate embeddings")
@@ -70,10 +70,10 @@ func GetEmbeddings(file []string) ([][]float32, error) {
         )
     }
 
-    results, err := embeddingPipeline.RunPipeline(file)
+    results, err := embeddingPipeline.RunPipeline([]string{file})
     if err != nil {
         return nil, fmt.Errorf("Falha ao gerar embeddings: %v", err)
     }
 
-    return results.Embeddings, nil
+    return results.Embeddings[0], nil
 }

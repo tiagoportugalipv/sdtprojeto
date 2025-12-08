@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+        "strings"
 
 	// bibs externas
 	"github.com/gin-gonic/gin"
@@ -51,17 +52,18 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
 
     uploadedFile.Seek(0, io.SeekStart)
 
-    fileLines := []string{}
+    fileContent := strings.Builder{}
+
     scanner := bufio.NewScanner(uploadedFile)
 
 
     for scanner.Scan() {
          line := scanner.Text() 
-         fileLines = append(fileLines,line) 
+         fileContent.WriteString(line)
     }
 
 
-    embs,err := embedding.GetEmbeddings(fileLines)
+    embs,err := embedding.GetEmbeddings(fileContent.String())
 
 
 

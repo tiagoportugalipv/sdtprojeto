@@ -16,6 +16,11 @@ type Vector struct {
 	Content []string // Array de CIDs
 }
 
+type CidVectorEmbsEntry struct {
+	InIndex bool
+	Content []float32
+}
+
 
 func (v Vector) Hash() (string) {
 
