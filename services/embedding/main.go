@@ -44,8 +44,10 @@ func SetUpModel() (error, string) {
 
 
 // GetEmbeddings gera embeddings para um conjunto de strings.
-func GetEmbeddings(fileLines []string) ([][]float32, error) {
-    if len(fileLines) == 0 {
+//TODO: Mudar para um array com uma unica string 
+func GetEmbeddings(file []string) ([][]float32, error) {
+
+    if len(file) == 0 {
         return nil, fmt.Errorf("input fileLines is empty, cannot generate embeddings")
     }
 
@@ -68,7 +70,7 @@ func GetEmbeddings(fileLines []string) ([][]float32, error) {
         )
     }
 
-    results, err := embeddingPipeline.RunPipeline(fileLines)
+    results, err := embeddingPipeline.RunPipeline(file)
     if err != nil {
         return nil, fmt.Errorf("Falha ao gerar embeddings: %v", err)
     }

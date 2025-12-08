@@ -27,7 +27,6 @@ const (
     ACK Topico = "ack" // Topico Ack
     COMM Topico = "commit" // Topico Commit
     HTB Topico = "heartbeat" // Topico Heartbeat
-    IALV Topico = "iamalive" // Topico IamAlive
 )
 
 
@@ -148,12 +147,6 @@ func ListenTo(pubsubInt iface.PubSubAPI, topico Topico, callback func(sender pee
                 return fmt.Errorf("Erro ao decodificar HeartBeatMessage: %v", err)
             }
             msg = heartbeatMsg
-        case IALV:
-            var iamaliveMsg IAmAliveMessage
-            if err := decoder.Decode(&iamaliveMsg); err != nil {
-                return fmt.Errorf("Erro ao decodificar IamAliveMessage: %v", err)
-            }
-            msg = iamaliveMsg
         default:
             return fmt.Errorf("Topico desconhecido: %v", topico)
         }
