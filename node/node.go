@@ -441,6 +441,7 @@ func receiveNewVector(nd *Node,v Vector, embs []float32){
 }
 
 func receiveCommit(nd *Node, version int) {
+
     fmt.Println("=== receiveCommit ===")
     fmt.Printf("Versão: %d\n", version)
     fmt.Println("Vetor na cache correspondente à versão:")
@@ -459,7 +460,6 @@ func receiveCommit(nd *Node, version int) {
     }
     
     // Mover TODOS os embs de EmbsStaging para CidVectorEmbs
-    // (não apenas os de diff, porque podem haver embs antigos ainda em staging)
     for _, cid := range nd.CidVector.Content {
         emb, ok := nd.EmbsStaging[cid]
         if ok {
@@ -468,9 +468,11 @@ func receiveCommit(nd *Node, version int) {
             fmt.Printf("Movido emb de staging para CidVectorEmbs: %s\n", cid)
         }
     }
+
+	idx := 0
     
     // Adicionar ao índice Faiss todos os embs que temos e ainda não estão no índice
-    for idx := 0; idx < len(nd.CidVector.Content); idx++ {
+    for ; idx < len(nd.CidVector.Content); idx++ {
         cid := nd.CidVector.Content[idx]
         emb := nd.CidVectorEmbs[cid]
         
@@ -488,7 +490,7 @@ func receiveCommit(nd *Node, version int) {
     
     // Calcular missing: apenas CIDs que estão no vetor mas não em CidVectorEmbs
     missing := []string{}
-    for idx := len(nd.CidsInIndex); idx < len(nd.CidVector.Content); idx++ {
+    for ; idx < len(nd.CidVector.Content); idx++ {
         cid := nd.CidVector.Content[idx]
         emb := nd.CidVectorEmbs[cid]
         
@@ -600,8 +602,6 @@ func followerRoutine(nd *Node,ctx context.Context){
 	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.RBLR,func(sender peer.ID, msg any, stop *bool) { 
 
 
-		fmt.Printf("Recebi resposta de rebuild do peer %v\n\n",sender)
-
 		rblrmsg,ok := msg.(messaging.RebuildResponseMessage)
 	    if(!ok){
 			fmt.Printf("Esperado rebuildResponseMessage, obtido %T", rblrmsg)
@@ -610,12 +610,12 @@ func followerRoutine(nd *Node,ctx context.Context){
 		if(rblrmsg.Dest == nd.IpfsCore.Identity){
 
 
-			fmt.Printf("O destinatario sou eu vou adicionar aos EmbsStaging\n\n")
+			fmt.Printf("Recebi resposta de rebuild do peer %v\n\n",sender)
 
 			for cid,emb := range rblrmsg.Response {
 
 				fmt.Printf("CID %v recebido com os seguitnes embs: \n %v",cid,emb)
-				nd.CidVectorEmbs[cid] = emb
+				nd.EmbsStaging[cid] = emb
 			}
 
 
