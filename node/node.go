@@ -1,16 +1,13 @@
 package node
 
 import (
-
 	// bibs padrão
-
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"slices"
-
 	// "log"
 	"os"
 	"strings"
@@ -22,7 +19,6 @@ import (
 	"projeto/types"
 
 	// bibs externas
-
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/config"
@@ -33,7 +29,6 @@ import (
 	"github.com/ipfs/kubo/repo"
 	"github.com/ipfs/kubo/repo/fsrepo"
 	"github.com/libp2p/go-libp2p/core/peer"
-
 	faiss "github.com/DataIntelligenceCrew/go-faiss"
 	iface "github.com/ipfs/kubo/core/coreiface"
 	ifaceOptions "github.com/ipfs/kubo/core/coreiface/options"
@@ -41,121 +36,99 @@ import (
 
 // Estruturas e Setup //
 var Npeers int = 0 // Npeers na rede
-
 type Vector = types.Vector
 
-
 // Enum de estado
-
 type NodeState int
 
 // Estados Raft
 const (
-	FOLLOWER NodeState = iota // 0
+	FOLLOWER  NodeState = iota // 0
 	CANDIDATE
 	LEADER
 )
 
-
 // No
-
 type Node struct {
-	IpfsCore *core.IpfsNode 
-	IpfsApi  iface.CoreAPI
-	CidVector Vector
+	IpfsCore      *core.IpfsNode
+	IpfsApi       iface.CoreAPI
+	CidVector     Vector
 	CidVectorEmbs map[string]([]float32)
-	SearchIndex	*faiss.IndexFlat 
-	CidsInIndex []string
-	VectorCache map[int](Vector)
-	EmbsStaging map[string]([]float32)
-	State NodeState // Estado do nó
-
+	SearchIndex   *faiss.IndexFlat
+	CidsInIndex   []string
+	VectorCache   map[int](Vector)
+	EmbsStaging   map[string]([]float32)
+	State         NodeState // Estado do nó
 	// Lider Stuff
 	StagingAKCs map[int]int
-	CommitDone chan struct{} // Para depois sinalizar a api para responder ao cliente depois dos COMMITACK
+	CommitDone  chan struct{} // Para depois sinalizar a api para responder ao cliente depois dos COMMITACK
 }
 
-
 // Novo repositótio IPFS
-func newIpfsRepo(repoPath string) (error) {
-
+func newIpfsRepo(repoPath string) error {
 	_, err := os.Stat(repoPath)
-
-	// err == nil -> retornou info sobre o caminho -> caminho já existente	
-	if(err == nil){
-		err = errors.New("Dirétoria/Repositório já existente\n") 
+	// err == nil -> retornou info sobre o caminho -> caminho já existente
+	if err == nil {
+		err = errors.New("Dirétoria/Repositório já existente\n")
 		return err
 	}
 
 	// Se existe outro tipo de erro para além do caminho não existir retornamos o erro
-	if(!os.IsNotExist(err)){
+	if !os.IsNotExist(err) {
 		return err
 	}
-
 
 	// Criar a diretória
 	err = os.Mkdir(repoPath, 0750)
-
-	if(err != nil){
-		err = fmt.Errorf("Falha ao criar diretoria: %v\n",err)
+	if err != nil {
+		err = fmt.Errorf("Falha ao criar diretoria: %v\n", err)
 		return err
 	}
+
 	// Criar a configuração do repositório.
 	cfg, err := config.Init(io.Discard, 2048)
-	cfg.Pubsub.Router="gossipsub"
-	cfg.Pubsub.Enabled=1
-	cfg.Ipns.UsePubsub=1
-
+	cfg.Pubsub.Router = "gossipsub"
+	cfg.Pubsub.Enabled = 1
+	cfg.Ipns.UsePubsub = 1
 	if err != nil {
-		err = fmt.Errorf("Falha ao criar configuração: %v\n",err)
+		err = fmt.Errorf("Falha ao criar configuração: %v\n", err)
 		return err
 	}
-
 
 	pluginInjection(repoPath)
 
-
 	// Inicializar repositório
 	err = fsrepo.Init(repoPath, cfg)
-
 	if err != nil {
-		err = fmt.Errorf("Falha ao iniciar: %v\n",err)
+		err = fmt.Errorf("Falha ao iniciar: %v\n", err)
 		return err
 	}
 
 	return nil
-
 }
 
 // Novo nó ipfs
 func newIpfsNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
-
-	var repo repo.Repo	
-
+	var repo repo.Repo
 	err := pluginInjection(repoPath)
-
-	if(err == nil){
+	if err == nil {
 		repo, err = fsrepo.Open(repoPath)
 	}
 
 	// Erro
 	if err != nil {
-
 		//Criado novo repositório
 		err = newIpfsRepo(repoPath)
 		if err != nil {
-			return nil, fmt.Errorf("Falha ao criar novo repositório : %v\n",err)
+			return nil, fmt.Errorf("Falha ao criar novo repositório : %v\n", err)
 		}
 
 		//Tenta abrir o repositório que esta na pasta repoPath
 		repo, err = fsrepo.Open(repoPath)
-
 		if err != nil {
 			return nil, fmt.Errorf("Falha ao abrir novo repositótio : %v\n", err)
 		}
 	}
-
-
 
 	// Defenições especificas do nó
 	nodeOptions := &core.BuildCfg{
@@ -168,86 +141,66 @@ func newIpfsNode(ctx context.Context, repoPath string) (*core.IpfsNode, error) {
 		},
 	}
 
-
 	// Criação do nó
 	ipfsCore, err := core.NewNode(ctx, nodeOptions)
-
 	if err != nil {
 		return nil, fmt.Errorf("Falha ao criar nó IPFS: %v\n", err)
 	}
 
 	return ipfsCore, nil
-
 }
 
 // Connectar nó a peers
-func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) (int,error) {
-
-	// Array para gerir nós desconectados	
+func connectToPeers(ipfs iface.CoreAPI, peers []string, self string) (int, error) {
+	// Array para gerir nós desconectados
 	unconnectedPeers := make(map[string]error)
 	npeers := 0
-
-
-	if(len(peers) > 0){
-
+	if len(peers) > 0 {
 		for _, peerIdString := range peers {
-
-			if(peerIdString == self){
+			if peerIdString == self {
 				continue
 			}
 
 			// Descodificar o CID
 			peerId, err := peer.Decode(peerIdString)
-			addr := peer.AddrInfo{ID:peerId}
-
-			if(err != nil){
-				err = fmt.Errorf("Peer String Invalida: %v\n",err)
+			addr := peer.AddrInfo{ID: peerId}
+			if err != nil {
+				err = fmt.Errorf("Peer String Invalida: %v\n", err)
 				unconnectedPeers[peerIdString] = err
 				continue
 			}
 
 			timeoutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel() 
-
+			defer cancel()
 
 			// Conectar com 1 peer
 			err = ipfs.Swarm().Connect(timeoutCtx, addr)
-
-
-			if(err != nil){
-				err = fmt.Errorf("Conexão não foi possivel: %v\n",err)
+			if err != nil {
+				err = fmt.Errorf("Conexão não foi possivel: %v\n", err)
 				unconnectedPeers[peerIdString] = err
 			} else {
 				npeers = npeers + 1
 			}
-
 		}
-
 	}
-	
+
 	// 1 ou + peers não conectados com sucesso -> erro
 	if len(unconnectedPeers) > 0 {
-
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("%d peers não conectados:\n\n", len(unconnectedPeers)))
-
 		for peerID, err := range unconnectedPeers {
 			sb.WriteString(fmt.Sprintf(" - %s → %v\n", peerID, err))
 		}
 
-		return npeers,fmt.Errorf("%s",sb.String())
+		return npeers, fmt.Errorf("%s", sb.String())
 	}
 
-	return npeers,nil
-
-
+	return npeers, nil
 }
-
 
 // Injeção de plugins (sem isto dá erro: unknown datastore type: flatfs)
 // https://discuss.ipfs.tech/t/fixed-unknown-datastore-type-flatfs/15805/5
-func pluginInjection(repoPath string)(error){
-
+func pluginInjection(repoPath string) error {
 	plugins, err := loader.NewPluginLoader(repoPath)
 	if err != nil {
 		err = fmt.Errorf("Erro ao carregar plugins: %s", err)
@@ -255,7 +208,6 @@ func pluginInjection(repoPath string)(error){
 	}
 
 	if err := plugins.Initialize(); err != nil {
-
 		err = fmt.Errorf("Erro ao inicializar plugins: %s", err)
 		return err
 	}
@@ -266,572 +218,424 @@ func pluginInjection(repoPath string)(error){
 	}
 
 	return nil
-
 }
 
-
-
-
 // Criar novo nó
-
 // Para colocar o nó a leader basta ativar esta flag
 var LeaderFlag bool
 
-
-func Create(repoPath string,  peers []string) (*Node,error){
-
+func Create(repoPath string, peers []string) (*Node, error) {
 	var npeers int
-
-	ipfsCore, err := newIpfsNode(context.Background(),repoPath);
-
-	if(err!=nil){
-		return nil,err
+	ipfsCore, err := newIpfsNode(context.Background(), repoPath)
+	if err != nil {
+		return nil, err
 	}
 
-	ipfsCoreApi,err := coreapi.NewCoreAPI(ipfsCore)
-
-
-	if(err!=nil){
-		return nil,err
+	ipfsCoreApi, err := coreapi.NewCoreAPI(ipfsCore)
+	if err != nil {
+		return nil, err
 	}
 
-	if(peers != nil && cap(peers) > 0){
-		npeers,err = connectToPeers(ipfsCoreApi,peers,ipfsCore.Identity.String())
+	if peers != nil && cap(peers) > 0 {
+		npeers, err = connectToPeers(ipfsCoreApi, peers, ipfsCore.Identity.String())
 	}
 
 	state := FOLLOWER
-
-	if(LeaderFlag){
+	if LeaderFlag {
 		state = LEADER
 	}
 
-	emptyVector := 
-		Vector {
-			Ver: 0,
+	emptyVector :=
+		Vector{
+			Ver:     0,
 			Content: []string{},
 		}
 
-	n := Node {
-
-		IpfsCore : ipfsCore,
-		IpfsApi : ipfsCoreApi,
-		VectorCache: make(map[int]Vector),
-		EmbsStaging: make(map[string]([]float32)),
-		CidVector: emptyVector,
+	n := Node{
+		IpfsCore:      ipfsCore,
+		IpfsApi:       ipfsCoreApi,
+		VectorCache:   make(map[int]Vector),
+		EmbsStaging:   make(map[string]([]float32)),
+		CidVector:     emptyVector,
 		CidVectorEmbs: make(map[string]([]float32)),
-		CidsInIndex: []string{},
-		State: state,
-
+		CidsInIndex:   []string{},
+		State:         state,
 	}
 
-	if(LeaderFlag){
-
-
+	if LeaderFlag {
 		n.CommitDone = make(chan struct{})
 		n.StagingAKCs = make(map[int]int)
-		
-
 	}
 
-
 	var faissErr error
-
-	n.SearchIndex,faissErr = faiss.NewIndexFlatL2(embedding.VECTORDIMS) 
-
-	if(faissErr != nil){
+	n.SearchIndex, faissErr = faiss.NewIndexFlatL2(embedding.VECTORDIMS)
+	if faissErr != nil {
 		faissErr = fmt.Errorf("Erro ao criar index para o lider : \n%v", err)
-		return nil,faissErr
+		return nil, faissErr
 	}
 
 	Npeers = npeers
-
-	return &n,err
-
+	return &n, err
 }
 
 // Metodos //
-
 // Upload de ficheiros
-func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath,error){
-
-
+func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath, error) {
 	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	fileCid, err := nd.IpfsApi.Unixfs().Add(uploadCtx,files.NewBytesFile(fileBytes))
-
-	if(err != nil){
-		err = fmt.Errorf("Erro ao dar upload de ficheiro: %v\n",err)
+	fileCid, err := nd.IpfsApi.Unixfs().Add(uploadCtx, files.NewBytesFile(fileBytes))
+	if err != nil {
+		err = fmt.Errorf("Erro ao dar upload de ficheiro: %v\n", err)
 	}
 
-
-	return fileCid,err
-
+	return fileCid, err
 }
 
-func (nd *Node) Run(){
-
-	ctx,cancel := context.WithCancel(context.Background()) 
+func (nd *Node) Run() {
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.RBLQ,func(sender peer.ID, msg any, stop *bool) { 
-
-		fmt.Printf("Recebi mensagem para dar rebuild ao peer %v\n\n",sender)
-
-		rblqmsg,ok := msg.(messaging.RebuildQueryMessage)
-	    if(!ok){
+	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.RBLQ, func(sender peer.ID, msg any, stop *bool) {
+		fmt.Printf("[REBUILD-REQ] Recebida solicitação de rebuild do peer: %v\n", sender)
+		rblqmsg, ok := msg.(messaging.RebuildQueryMessage)
+		if !ok {
 			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
-	    }
+		}
 
-		if(rblqmsg.Dest == nd.IpfsCore.Identity && sender != nd.IpfsCore.Identity){
-
-
-			fmt.Printf("Vou ajudar a dar rebuild ao peer %v\n\n",sender)
-
+		if rblqmsg.Dest == nd.IpfsCore.Identity && sender != nd.IpfsCore.Identity {
+			fmt.Printf("[REBUILD-REQ] A processar rebuild para peer: %v\n", sender)
 			response := make(map[string][]float32)
-
-			if(len(rblqmsg.Info) == 0){
-
-				go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.RBLR,messaging.RebuildResponseMessage{Response:nd.CidVectorEmbs, Dest: sender, Total:true})
+			if len(rblqmsg.Info) == 0 {
+				go messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.RBLR, messaging.RebuildResponseMessage{Response: nd.CidVectorEmbs, Dest: sender, Total: true})
 				return
-
 			}
 
-			for _,cid := range rblqmsg.Info {
-
-				emb,exists := nd.CidVectorEmbs[cid]
-
-				if(exists){
+			for _, cid := range rblqmsg.Info {
+				emb, exists := nd.CidVectorEmbs[cid]
+				if exists {
 					response[cid] = emb
-				} 
+				}
 			}
-
-
-			go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.RBLR,messaging.RebuildResponseMessage{Response:response, Dest: sender, Total:false})
+			go messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.RBLR, messaging.RebuildResponseMessage{Response: response, Dest: sender, Total: false})
 			return
-
 		}
 
 	})
-
-
 	switch nd.State {
 	case LEADER:
-	     liderRoutine(nd,ctx)
+		liderRoutine(nd, ctx)
 	default:
-	     followerRoutine(nd,ctx)
+		followerRoutine(nd, ctx)
 	}
-
 }
 
 // Follower
-
-func receiveNewVector(nd *Node,v Vector, embs []float32){
-
-	if(nd.CidVector.Ver <= v.Ver && isSubset(nd.CidVector,v)){
-		fmt.Printf("Vetor recebido:\n%v\n",v.String())
-		fmt.Printf("Hash do vetor: %s\n",v.Hash())
-		messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.ACK,messaging.AckMessage{Version: v.Ver,Hash: nd.CidVector.Hash()})
+func receiveNewVector(nd *Node, v Vector, embs []float32) {
+	if nd.CidVector.Ver <= v.Ver && isSubset(nd.CidVector, v) {
+		fmt.Printf("[VETOR] Recebido (versão %d):\n%v\n", v.Ver, v.String())
+		fmt.Printf("[VETOR] Hash: %s\n", v.Hash())
+		messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.ACK, messaging.AckMessage{Version: v.Ver, Hash: nd.CidVector.Hash()})
 	}
 
 	nd.VectorCache[v.Ver] = v
 	nd.EmbsStaging[v.Content[len(v.Content)-1]] = embs
-
 }
 
 func receiveCommit(nd *Node, version int) {
+	fmt.Printf("\n[COMMIT] Processando versão %d\n", version)
+	fmt.Printf("[COMMIT] Vetor na cache (v%d): %v\n", version, nd.VectorCache[version].Content)
+	fmt.Printf("[COMMIT] Vetor CID atual: %v\n", nd.CidVector.Content)
 
-    fmt.Println("=== receiveCommit ===")
-    fmt.Printf("Versão: %d\n", version)
-    fmt.Println("Vetor na cache correspondente à versão:")
-    fmt.Println(nd.VectorCache[version].Content)
-    fmt.Println("Vetor CID atual:")
-    fmt.Println(nd.CidVector.Content)
-    
-    // Atualizar o vetor
-    nd.CidVector = nd.VectorCache[version]
-    
-    // Limpar cache de versões antigas
-    for k := range nd.VectorCache {
-        if k <= version {
-            delete(nd.VectorCache, k)
-        }
-    }
-    
-    // Mover TODOS os embs de EmbsStaging para CidVectorEmbs
-    for _, cid := range nd.CidVector.Content {
-        emb, ok := nd.EmbsStaging[cid]
-        if ok {
-            nd.CidVectorEmbs[cid] = emb
-            delete(nd.EmbsStaging, cid)
-            fmt.Printf("Movido emb de staging para CidVectorEmbs: %s\n", cid)
-        }
-    }
+	// Atualizar o vetor
+	nd.CidVector = nd.VectorCache[version]
 
-	idx := 0
-    
-    // Adicionar ao índice Faiss todos os embs que temos e ainda não estão no índice
-    for ; idx < len(nd.CidVector.Content); idx++ {
-        cid := nd.CidVector.Content[idx]
-        emb := nd.CidVectorEmbs[cid]
-        
-        if emb == nil {
-            fmt.Printf("Embedding não encontrado para CID %s (posição %d)\n", cid, idx)
-            break
-        }
-        
-        if !slices.Contains(nd.CidsInIndex, cid) {
-            nd.SearchIndex.Add(emb)
-            nd.CidsInIndex = append(nd.CidsInIndex, cid)
-            fmt.Printf("Adicionado ao índice Faiss: %s\n", cid)
-        }
-    }
-    
-    // Calcular missing: apenas CIDs que estão no vetor mas não em CidVectorEmbs
-    missing := []string{}
-    for ; idx < len(nd.CidVector.Content); idx++ {
-        cid := nd.CidVector.Content[idx]
-        emb := nd.CidVectorEmbs[cid]
-        
-        if emb == nil {
-            fmt.Printf("Este emb não existe e precisa de ser encontrado: %s\n", cid)
-            missing = append(missing, cid)
-        }
-    }
-    
-    fmt.Println("Embeddings em falta:")
-    fmt.Println(missing)
-    
-    // Pedir embeddings em falta se houver
-    if len(missing) > 0 {
-        rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-        randomPeer, error := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ))
-        cancel()
-        
-        if error == nil {
-            fmt.Printf("A pedir rebuild ao peer %v para %d CIDs\n", randomPeer, len(missing))
-            go messaging.PublishTo(
-                nd.IpfsApi.PubSub(),
-                messaging.RBLQ,
-                messaging.RebuildQueryMessage{Dest: randomPeer, Info: missing},
-            )
-        } else {
-            fmt.Printf("Erro ao encontrar peer para rebuild: %v\n", error)
-        }
-    }
-    
-    fmt.Printf("Vetor atualizado: %v\n", nd.CidVector.String())
-}
-
-
-//func heartBeatCheck(nd *Node){
-func heartBeatCheck(lastLiderHeartBeat *time.Time){
-
-
-	for {
-
-		if(time.Since(*lastLiderHeartBeat) >= (30*time.Second)){
-			fmt.Println("O lider falhou vamos a eleição")
-			//TODO passar para rotina de eleicao
+	// Limpar cache de versões antigas
+	for k := range nd.VectorCache {
+		if k <= version {
+			delete(nd.VectorCache, k)
 		}
-
-		time.Sleep(15 * time.Second)
-
 	}
 
-}
+	// Mover TODOS os embs de EmbsStaging para CidVectorEmbs
+	for _, cid := range nd.CidVector.Content {
+		emb, ok := nd.EmbsStaging[cid]
+		if ok {
+			nd.CidVectorEmbs[cid] = emb
+			delete(nd.EmbsStaging, cid)
+			fmt.Printf("[COMMIT] Embedding movido de staging para CidVectorEmbs: %s\n", cid)
+		}
+	}
 
-
-
-func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID, error) {
-    ps := nd.IpfsApi.PubSub()
-
-    peers, err := ps.Peers(ctx, ifaceOptions.PubSub.Topic(topic))
-    if err != nil {
-		err = fmt.Errorf("Erro ao procurar peers do pubsub para o tópico %s: %v\n", topic, err)
-        return nd.IpfsCore.Identity,err 
-    }
-
-	idx := rand.Intn(len(peers)) 
-
-    return peers[idx],nil
-}
-
-func followerRoutine(nd *Node,ctx context.Context){
-
-	// Assumimos o primeiro beat na rotina follower
-	lastLiderHeartBeat := time.Now().Add(15 * time.Second)
-
-    fmt.Printf("A iniciar routina follower\n")
-
-	// TODO Alterar para depois acomodar o processo de eleicao
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.HTB,func(sender peer.ID, msg any, stop *bool) { 
-
-		htbmsg,ok := msg.(messaging.HeartBeatMessage)
-	    if(!ok){
-			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
-	    }
-
-		lastLiderHeartBeat = time.Now()
-
-		Npeers = htbmsg.Npeers 
-	})
-
-	go heartBeatCheck(&lastLiderHeartBeat)
-
-	// Ask for a snapshot of the system when joining
-
-	// rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// randomPeer,error := nd.getPubSubRandomPeer(rpeerctx,string(messaging.RBLQ))
-	// cancel()
-	//
-	// if(error == nil){
-	//
-	//
-	// 	fmt.Printf("Entrei agora na rede vou pedir rebuild ao peer %v\n\n",randomPeer)
-	//
-	// 	go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.RBLQ,messaging.RebuildQueryMessage{
-	// 		Dest: randomPeer,
-	// 		Info: []string{},
-	// 	})
-	//
-	// }
-
-
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.RBLR,func(sender peer.ID, msg any, stop *bool) { 
-
-
-		rblrmsg,ok := msg.(messaging.RebuildResponseMessage)
-	    if(!ok){
-			fmt.Printf("Esperado rebuildResponseMessage, obtido %T", rblrmsg)
-	    }
-
-		if(rblrmsg.Dest == nd.IpfsCore.Identity){
-
-
-			fmt.Printf("Recebi resposta de rebuild do peer %v\n\n",sender)
-
-			for cid,emb := range rblrmsg.Response {
-
-				fmt.Printf("CID %v recebido com os seguitnes embs: \n %v",cid,emb)
-				nd.EmbsStaging[cid] = emb
-			}
-
-
-
+	idx := 0
+	// Adicionar ao índice Faiss todos os embs que temos e ainda não estão no índice
+	for ; idx < len(nd.CidVector.Content); idx++ {
+		cid := nd.CidVector.Content[idx]
+		emb := nd.CidVectorEmbs[cid]
+		if emb == nil {
+			fmt.Printf("[COMMIT] Embedding não encontrado para CID %s (posição %d)\n", cid, idx)
+			break
 		}
 
+		if !slices.Contains(nd.CidsInIndex, cid) {
+			nd.SearchIndex.Add(emb)
+			nd.CidsInIndex = append(nd.CidsInIndex, cid)
+			fmt.Printf("[COMMIT] Adicionado ao índice Faiss: %s (Total: %d)\n", cid, len(nd.CidsInIndex))
+		}
+	}
+
+	// Calcular missing: apenas CIDs que estão no vetor mas não em CidVectorEmbs
+	missing := []string{}
+	for ; idx < len(nd.CidVector.Content); idx++ {
+		cid := nd.CidVector.Content[idx]
+		emb := nd.CidVectorEmbs[cid]
+		if emb == nil {
+			fmt.Printf("[COMMIT] Embedding em falta detectado: %s\n", cid)
+			missing = append(missing, cid)
+		}
+	}
+
+	fmt.Printf("[COMMIT] Lista de embeddings em falta: %v\n", missing)
+
+	// Pedir embeddings em falta se houver
+	if len(missing) > 0 {
+		rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		randomPeer, error := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ))
+		cancel()
+		if error == nil {
+			fmt.Printf("[COMMIT] A solicitar rebuild ao peer %v para %d CIDs\n", randomPeer, len(missing))
+			go messaging.PublishTo(
+				nd.IpfsApi.PubSub(),
+				messaging.RBLQ,
+				messaging.RebuildQueryMessage{Dest: randomPeer, Info: missing},
+			)
+
+		} else {
+			fmt.Printf("[COMMIT] Erro ao encontrar peer para rebuild: %v\n", error)
+		}
+	}
+	fmt.Printf("[COMMIT] Vetor atualizado (versão %d): %v\n", nd.CidVector.Ver, nd.CidVector.String())
+}
+
+//func heartBeatCheck(nd *Node){
+func heartBeatCheck(lastLiderHeartBeat *time.Time) {
+	for {
+		if time.Since(*lastLiderHeartBeat) >= (30 * time.Second) {
+			fmt.Printf("[HEARTBEAT] Timeout do líder detectado - iniciando eleição\n")
+			//TODO passar para rotina de eleicao
+		}
+		time.Sleep(15 * time.Second)
+	}
+}
+
+func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID, error) {
+	ps := nd.IpfsApi.PubSub()
+	peers, err := ps.Peers(ctx, ifaceOptions.PubSub.Topic(topic))
+	if err != nil {
+		err = fmt.Errorf("Erro ao procurar peers do pubsub para o tópico %s: %v\n", topic, err)
+		return nd.IpfsCore.Identity, err
+	}
+
+	idx := rand.Intn(len(peers))
+	return peers[idx], nil
+}
+
+func followerRoutine(nd *Node, ctx context.Context) {
+	// Assumimos o primeiro beat na rotina follower
+	lastLiderHeartBeat := time.Now().Add(15 * time.Second)
+	fmt.Printf("\n[ESTADO] Iniciando rotina FOLLOWER\n")
+
+	// TODO Alterar para depois acomodar o processo de eleicao
+	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.HTB, func(sender peer.ID, msg any, stop *bool) {
+		htbmsg, ok := msg.(messaging.HeartBeatMessage)
+		if !ok {
+			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
+		}
+
+		lastLiderHeartBeat = time.Now()
+		Npeers = htbmsg.Npeers
+	})
+	go heartBeatCheck(&lastLiderHeartBeat)
+
+	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.RBLR, func(sender peer.ID, msg any, stop *bool) {
+		rblrmsg, ok := msg.(messaging.RebuildResponseMessage)
+		if !ok {
+			fmt.Printf("Esperado rebuildResponseMessage, obtido %T", rblrmsg)
+		}
+
+		if rblrmsg.Dest == nd.IpfsCore.Identity {
+			fmt.Printf("[REBUILD-RES] Recebida resposta de rebuild do peer: %v\n", sender)
+			for cid, emb := range rblrmsg.Response {
+				fmt.Printf("[REBUILD-RES] CID %s recebido com embedding (dim: %d)\n", cid, len(emb))
+				nd.EmbsStaging[cid] = emb
+			}
+		}
 	})
 
+	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.AEM, func(sender peer.ID, msg any, stop *bool) {
+		aemMsg, ok := msg.(messaging.AppendEntryMessage)
+		if !ok {
+			fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
+		}
 
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.AEM,func(sender peer.ID, msg any, stop *bool) {
-	    aemMsg,ok := msg.(messaging.AppendEntryMessage)
-	    if(!ok){
-	        fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
-	    }
-	    fmt.Printf("Recebi AE message com vetor\n%v\n",aemMsg.Vector.String())
-	    receiveNewVector(nd,aemMsg.Vector,aemMsg.Embeddings)
+		fmt.Printf("[APPEND-ENTRY] Recebido com vetor (versão %d):\n%v\n", aemMsg.Vector.Ver, aemMsg.Vector.String())
+		receiveNewVector(nd, aemMsg.Vector, aemMsg.Embeddings)
 	})
 
-	go messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.COMM,func(sender peer.ID, msg any, stop *bool) { 
-		fmt.Printf("Mensagem de commit recebida\n")
-		fmt.Printf("Vetor atual :\n%v\n",nd.CidVector.String())
-	    commMgs,ok := msg.(messaging.CommitMessage)
-	    if(!ok){
+	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.COMM, func(sender peer.ID, msg any, stop *bool) {
+		fmt.Printf("[COMMIT-MSG] Mensagem de commit recebida\n")
+		fmt.Printf("[COMMIT-MSG] Vetor atual (v%d):\n%v\n", nd.CidVector.Ver, nd.CidVector.String())
+		commMgs, ok := msg.(messaging.CommitMessage)
+		if !ok {
 			fmt.Printf("Esperado CommitMessage, obtido %T", msg)
-	    }
-		receiveCommit(nd,commMgs.Version) 
-		fmt.Printf("Vetor atualizado :\n%v\n",nd.CidVector.String())
-	})
+		}
 
+		receiveCommit(nd, commMgs.Version)
+		fmt.Printf("[COMMIT-MSG] Vetor atualizado (v%d):\n%v\n", nd.CidVector.Ver, nd.CidVector.String())
+	})
 
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()
-        fmt.Printf("A terminar rotina follower\n")
-
+	fmt.Printf("\n[ESTADO] Terminando rotina FOLLOWER\n")
 }
 
 // Lider
+func receiveAck(nd *Node, hash string, version int) bool {
 
-func receiveAck(nd *Node,hash string,version int) (bool){
-
-	if(version <= nd.CidVector.Ver){
-		fmt.Println("Versão antiga vou passar check")
-		return true
-	}
-
-	valid := nd.CidVector.Hash() == hash;
-
-	if(valid){
-		fmt.Println("Valido a adicionar ack")
-		nd.StagingAKCs[version] = nd.StagingAKCs[version] + 1
-	}
-
-	fmt.Printf("Hash recebida %s\n",hash)
-	fmt.Printf("Hash do vetor atual %s\n",nd.CidVector.Hash())
-
-	fmt.Printf("Numeros de ACKs para a versao %v: %v/%v\n",version,nd.StagingAKCs[version],Npeers)  
-
-
-	if(nd.StagingAKCs[version] >= int(Npeers/2)){
-		fmt.Println("Vou dar commit")
-	    nd.CidVector = nd.VectorCache[version]
-	    messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.COMM,messaging.CommitMessage{ Version: version })
-
-		for k := range nd.VectorCache {
-
-			if k <= version {
-				delete(nd.StagingAKCs,k)
-				delete(nd.VectorCache,k)
-			}
-
-		}
-		//
-		// for _,cid := range nd.CidVector.Content {
-		//
-		// 	emb,emb_exists := nd.EmbsStaging[cid]
-		//
-		// 	if(emb_exists){
-		//
-		// 		nd.SearchIndex.Add(emb)
-		// 		nd.CidVectorEmbs[cid] = emb
-		// 		delete(nd.EmbsStaging,cid)
-		//
-		// 	}
-		// }
-	} else {
-		fmt.Println("Não vou dar commit")
-	}
-
-	return valid
-}
-
-
-func (nd *Node) getPubSubPeersCount(ctx context.Context, topic string) int {
-    ps := nd.IpfsApi.PubSub()
-
-    peers, err := ps.Peers(ctx, ifaceOptions.PubSub.Topic(topic))
-    if err != nil {
-        fmt.Printf("Erro ao procurar peers do pubsub para o tópico %s: %v\n", topic, err)
-        return Npeers 
+    if version <= nd.CidVector.Ver {
+        fmt.Println("Versão antiga vou passar check")
+        return true
     }
 
-    return len(peers)
-}
+    valid := nd.CidVector.Hash() == hash
+    if valid {
+        fmt.Println("Valido a adicionar ack")
+        nd.StagingAKCs[version] = nd.StagingAKCs[version] + 1
+    }
 
+    fmt.Printf("Hash recebida %s\n", hash)
+    fmt.Printf("Hash do vetor atual %s\n", nd.CidVector.Hash())
+    fmt.Printf("Numeros de ACKs para a versao %v: %v/%v\n", version, nd.StagingAKCs[version], Npeers)
 
-func heartBeatSender(nd *Node) {
+    if nd.StagingAKCs[version] >= int(Npeers/2) {
+        fmt.Println("Vou dar commit")
+        nd.CidVector = nd.VectorCache[version]
 
-    topic := string(messaging.AEM)
-
-    for {
-        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-        n := nd.getPubSubPeersCount(ctx, topic)
-        cancel()
-
-        if n > 0 && Npeers != n {
-            Npeers = n
-            fmt.Printf("Npeers atualizado a partir do pubsub: %v\n", Npeers)
+        // Mover embeddings de EmbsStaging para CidVectorEmbs (igual ao follower)
+        for _, cid := range nd.CidVector.Content {
+            emb, ok := nd.EmbsStaging[cid]
+            if ok {
+                nd.CidVectorEmbs[cid] = emb
+                delete(nd.EmbsStaging, cid)
+                fmt.Printf("Líder: movido emb de staging para CidVectorEmbs: %s\n", cid)
+            }
         }
 
-        messaging.PublishTo(
-            nd.IpfsApi.PubSub(),
-            messaging.HTB,
-            messaging.HeartBeatMessage{Npeers: Npeers},
-        )
+        // Adicionar ao índice Faiss todos os embs que temos e ainda não estão no índice
+        for _, cid := range nd.CidVector.Content {
+            emb := nd.CidVectorEmbs[cid]
+            if emb == nil {
+                fmt.Printf("Líder: embedding não encontrado para CID %s\n", cid)
+                continue
+            }
 
-        time.Sleep(15 * time.Second)
+            if !slices.Contains(nd.CidsInIndex, cid) {
+                nd.SearchIndex.Add(emb)
+                nd.CidsInIndex = append(nd.CidsInIndex, cid)
+                fmt.Printf("Líder: adicionado ao índice Faiss: %s\n", cid)
+            }
+        }
+
+        // Enviar commit
+        messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.COMM,
+            messaging.CommitMessage{Version: version})
+
+        // Limpar caches antigas
+        for k := range nd.VectorCache {
+            if k <= version {
+                delete(nd.StagingAKCs, k)
+                delete(nd.VectorCache, k)
+            }
+        }
+    } else {
+        fmt.Println("Não vou dar commit")
     }
+
+    return valid
 }
 
-func liderRoutine(nd *Node,ctx context.Context){
+func (nd *Node) getPubSubPeersCount(ctx context.Context, topic string) int {
+	ps := nd.IpfsApi.PubSub()
+	peers, err := ps.Peers(ctx, ifaceOptions.PubSub.Topic(topic))
+	if err != nil {
+		fmt.Printf("Erro ao procurar peers do pubsub para o tópico %s: %v\n", topic, err)
+		return Npeers
+	}
 
+	return len(peers)
+}
 
-    fmt.Printf("A iniciar routina lider\n")
+func heartBeatSender(nd *Node) {
+	topic := string(messaging.AEM)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		n := nd.getPubSubPeersCount(ctx, topic)
+		cancel()
+		if n > 0 && Npeers != n {
+			Npeers = n
+			fmt.Printf("[HEARTBEAT] Peers ativos atualizados via PubSub: %d\n", Npeers)
+		}
 
+		messaging.PublishTo(
+			nd.IpfsApi.PubSub(),
+			messaging.HTB,
+			messaging.HeartBeatMessage{Npeers: Npeers},
+		)
+
+		time.Sleep(15 * time.Second)
+	}
+}
+
+func liderRoutine(nd *Node, ctx context.Context) {
+	fmt.Printf("\n[ESTADO] Iniciando rotina LEADER\n")
 	go heartBeatSender(nd)
-
-	go  messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.ACK,func(sender peer.ID, msg any, stop *bool) {
-	    ackmsg,ok := msg.(messaging.AckMessage)
-	    if(!ok){
+	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.ACK, func(sender peer.ID, msg any, stop *bool) {
+		ackmsg, ok := msg.(messaging.AckMessage)
+		if !ok {
 			fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
-	    }
+		}
 
-	    fmt.Printf("Recebi ACK de %v, com hash %v\n",sender,ackmsg.Hash)
+		fmt.Printf("[ACK] Recebido de peer %v | Hash: %s\n", sender, ackmsg.Hash)
+		valid := receiveAck(nd, ackmsg.Hash, ackmsg.Version)
+		if !valid {
+			fmt.Printf("[ACK] Hash inválida para vetor:\n%v\n", nd.CidVector.String())
+			fmt.Printf("[ACK] Validação falhou\n")
+		}
 
-	    valid := receiveAck(nd,ackmsg.Hash,ackmsg.Version)
-
-	    if(!valid){
-			fmt.Printf("Vetor atual hash:\n%v\n",nd.CidVector.String())
-			fmt.Printf("ACK hash não valida\n")
-	    }
-		    
 	})
 
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()
-        fmt.Printf("A terminar rotina follower\n")
-
-
+	fmt.Printf("\n[ESTADO] Terminando rotina LEADER\n")
 }
 
-
-// Funções Auxiliares // 
-
+// Funções Auxiliares //
 func isSubset(sub Vector, super Vector) bool {
-
 	var subArray []string
 	var superArray []string
-
 	subArray = sub.Content
 	superArray = super.Content
 
-	if(len(subArray) == 0){
+	if len(subArray) == 0 {
 		return true
 	}
 
-	if(len(subArray) > len(superArray)){
+	if len(subArray) > len(superArray) {
 		return false
 	}
 
-	for i:=0;i<len(subArray);i++{
-
-		if(superArray[i]!=subArray[i]){
+	for i := 0; i < len(subArray); i++ {
+		if subArray[i] != superArray[i] {
 			return false
 		}
-
 	}
-
 	return true
 }
-
-
-// Source - https://stackoverflow.com/a/45428032
-func difference(a, b []string) []string {
-    mb := make(map[string]struct{}, len(b))
-    for _, x := range b {
-        mb[x] = struct{}{}
-    }
-    var diff []string
-    for _, x := range a {
-        if _, found := mb[x]; !found {
-            diff = append(diff, x)
-        }
-    }
-    return diff
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-

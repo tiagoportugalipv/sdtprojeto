@@ -102,6 +102,7 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
     }
 
     nd.VectorCache[newVersion] = newVector
+    nd.EmbsStaging[fileCid.String()] = embs 
 
     msg := messaging.AppendEntryMessage{
             Vector: newVector,
