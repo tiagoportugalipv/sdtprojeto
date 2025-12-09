@@ -4,10 +4,11 @@ import (
 
 	// bibs padrão
 	"bufio"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
-        "strings"
+	"strings"
 
 	// bibs externas
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,7 @@ import (
 	"projeto/node"
 	"projeto/services/embedding"
 	"projeto/services/messaging"
-        // "projeto/types"
+	// "projeto/types"
 )
 
 func UploadFile(ctx *gin.Context, nd *node.Node) {
@@ -84,7 +85,7 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
     }
 
     currentVector := nd.CidVector
-    newVersion := 0;
+    newVersion := nd.CidVector.Ver;
 
     for k := range(nd.VectorCache){
         if(k > newVersion){
@@ -93,6 +94,7 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
     }
 
     newVersion = newVersion + 1 
+    fmt.Printf("Nova versão : %v \n",newVersion)
 
     newVector := node.Vector {
          Ver: newVersion,
