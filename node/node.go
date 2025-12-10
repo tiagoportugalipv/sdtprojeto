@@ -81,7 +81,7 @@ type Node struct {
 
 
 type APIInterface interface {
-    Initialize(nd *Node,port int) (error)
+    Initialize(ctx context.Context,nd *Node,port int) (error)
 }
 
 func (nd *Node) SetAPI(api APIInterface) {
@@ -320,7 +320,7 @@ func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath, error) {
 func (nd *Node) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.RBLQ, func(sender peer.ID, msg any, stop *bool) {
+	go messaging.ListenTo(ctx,nd.IpfsApi.PubSub(), messaging.RBLQ, func(sender peer.ID, msg any, stop *bool) {
 		fmt.Printf("[REBUILD-REQ] Recebida solicitação de rebuild do peer: %v\n", sender)
 		rblqmsg, ok := msg.(messaging.RebuildQueryMessage)
 		if !ok {
@@ -489,11 +489,14 @@ func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID,
 func followerRoutine(nd *Node, ctx context.Context) {
 	// Assumimos o primeiro beat na rotina follower
 	lastLiderHeartBeat := time.Now().Add(15 * time.Second)
-	electionTimeout := time.Duration(150 + rand.Intn(150)) * time.Millisecond
+	electionTimeout := time.Duration(15 + rand.Intn(15)) * time.Second
 	fmt.Printf("\n[ESTADO] Iniciando rotina FOLLOWER\n")
 
+    localCtx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
 	// TODO Alterar para depois acomodar o processo de eleicao
-	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.HTB, func(sender peer.ID, msg any, stop *bool) {
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.HTB, func(sender peer.ID, msg any, stop *bool) {
 		htbmsg, ok := msg.(messaging.HeartBeatMessage)
 		if !ok {
 			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
@@ -506,13 +509,10 @@ func followerRoutine(nd *Node, ctx context.Context) {
     // Canal para sinalizar timeout de eleição
     timeoutChan := make(chan struct{})
     
-    // Context local para cancelar todas as goroutines desta rotina
-    localCtx, cancel := context.WithCancel(ctx)
-    defer cancel()
 
     go heartBeatCheck(&lastLiderHeartBeat, electionTimeout, timeoutChan, localCtx)
 
-	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.RBLR, func(sender peer.ID, msg any, stop *bool) {
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.RBLR, func(sender peer.ID, msg any, stop *bool) {
 		rblrmsg, ok := msg.(messaging.RebuildResponseMessage)
 		if !ok {
 			fmt.Printf("Esperado rebuildResponseMessage, obtido %T", rblrmsg)
@@ -527,7 +527,7 @@ func followerRoutine(nd *Node, ctx context.Context) {
 		}
 	})
 
-	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.AEM, func(sender peer.ID, msg any, stop *bool) {
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.AEM, func(sender peer.ID, msg any, stop *bool) {
 		aemMsg, ok := msg.(messaging.AppendEntryMessage)
 		if !ok {
 			fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)
@@ -537,7 +537,7 @@ func followerRoutine(nd *Node, ctx context.Context) {
 		receiveNewVector(nd, aemMsg.Vector, aemMsg.Embeddings)
 	})
 
-	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.COMM, func(sender peer.ID, msg any, stop *bool) {
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.COMM, func(sender peer.ID, msg any, stop *bool) {
 		fmt.Printf("[COMMIT-MSG] Mensagem de commit recebida\n")
 		fmt.Printf("[COMMIT-MSG] Vetor atual (v%d):\n%v\n", nd.CidVector.Ver, nd.CidVector.String())
 		commMgs, ok := msg.(messaging.CommitMessage)
@@ -663,10 +663,14 @@ func heartBeatSender(nd *Node) {
 func liderRoutine(nd *Node, ctx context.Context) {
 	fmt.Printf("\n[ESTADO] Iniciando rotina LEADER\n")
 
-	go nd.API.Initialize(nd,9000)
+
+    localCtx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+	go nd.API.Initialize(localCtx,nd,9000)
 
 	go heartBeatSender(nd)
-	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.ACK, func(sender peer.ID, msg any, stop *bool) {
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.ACK, func(sender peer.ID, msg any, stop *bool) {
 		ackmsg, ok := msg.(messaging.AckMessage)
 		if !ok {
 			fmt.Printf("Esperado AppendEntryMessage, obtido %T", msg)

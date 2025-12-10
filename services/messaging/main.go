@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 	"projeto/types"
 
 	// bibs externas
-	"github.com/libp2p/go-libp2p/core/peer"
 	iface "github.com/ipfs/kubo/core/coreiface"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 
@@ -205,7 +206,7 @@ func decodeMessage(data []byte,topico Topico) (any,error){
 
 
 // Receber mensagens
-func ListenTo(pubsubInt iface.PubSubAPI, topico Topico, callback func(sender peer.ID, msg any, stop *bool)) error {
+func ListenTo(ctx context.Context, pubsubInt iface.PubSubAPI, topico Topico, callback func(sender peer.ID, msg any, stop *bool)) error {
 
     subscribeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
@@ -214,39 +215,45 @@ func ListenTo(pubsubInt iface.PubSubAPI, topico Topico, callback func(sender pee
     if err != nil {
         return fmt.Errorf("Falha ao subscrever topico: %v", err)
     }
+    defer sub.Close() // Fecha subscription quando terminar
 
     st := false
 
     for {
+        select {
+        case <-ctx.Done():
+            // Contexto foi cancelado - terminar listener
+            fmt.Printf("[LISTENER] Cancelando listener de %s\n", topico)
+            return ctx.Err()
+            
+        default:
+            // Timeout curto para não bloquear indefinidamente
+            msgCtx, msgCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+            pubSubMsg, err := sub.Next(msgCtx)
+            msgCancel()
+            
+            if err != nil {
+                // Se for timeout, continua o loop para verificar ctx.Done()
+                if errors.Is(err, context.DeadlineExceeded) {
+                    continue
+                }
+                return fmt.Errorf("Erro ao ouvir mensagens: %v", err)
+            }
 
+            // Unmarshaling da mensagem
+            msg, err := decodeMessage(pubSubMsg.Data(), topico)
+            if err != nil {
+                // Log do erro mas continua a ouvir
+                fmt.Printf("[LISTENER] Erro ao decodificar mensagem: %v\n", err)
+                continue
+            }
 
-        pubSubMsg, err := sub.Next(context.Background())
-        if err != nil {
-            return fmt.Errorf("Erro ao ouvir menssagens: %v", err)
+            callback(pubSubMsg.From(), msg, &st)
+
+            if st {
+                fmt.Printf("[LISTENER] Parando listener de %s (stop flag)\n", topico)
+                return nil
+            }
         }
-
-        // Unmarshaling da mensagens
-
-        msg,err := decodeMessage(pubSubMsg.Data(),topico)
-
-        if(err != nil){
-            return err
-        }
-
-        callback(pubSubMsg.From(), msg, &st)
-
-        if(st){
-            break
-        }
-
     }
-
-    return nil
 }
-
-
-
-
-
-
-
