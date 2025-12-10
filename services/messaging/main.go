@@ -56,6 +56,7 @@ type AppendEntryMessage struct {
 
 type HeartBeatMessage struct {
     Npeers int
+    Term int
 }
 
 type RebuildQueryMessage struct {
@@ -77,6 +78,9 @@ type VoteMessage struct {
     Term int
     Candidate peer.ID
 }
+
+// Raft timings
+
 
 
 // Utilizamos gob pois suporta tipos nativos de go e é relativamente mais eficiente que json,

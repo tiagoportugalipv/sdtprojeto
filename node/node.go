@@ -56,7 +56,6 @@ type State struct {
 
 	NdState NodeState
 	CurrentTerm int
-	VotedFor peer.ID
 	StateMux sync.Mutex
 
 }
@@ -288,7 +287,6 @@ func Create(repoPath string, peers []string) (*Node, error) {
 		State:         State{
 						NdState: ndstate,
 						CurrentTerm: 0,
-						VotedFor: ipfsCore.Identity,
 						StateMux: sync.Mutex{},
 					   },
 	}
@@ -324,7 +322,7 @@ func (nd *Node) Run() {
 		fmt.Printf("[REBUILD-REQ] Recebida solicitação de rebuild do peer: %v\n", sender)
 		rblqmsg, ok := msg.(messaging.RebuildQueryMessage)
 		if !ok {
-			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
+			fmt.Printf("Esperado RebuildQueryMessage, obtido %T", msg)
 		}
 
 		if rblqmsg.Dest == nd.IpfsCore.Identity && sender != nd.IpfsCore.Identity {
@@ -488,8 +486,9 @@ func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID,
 
 func followerRoutine(nd *Node, ctx context.Context) {
 	// Assumimos o primeiro beat na rotina follower
-	lastLiderHeartBeat := time.Now().Add(15 * time.Second)
+	lastLiderHeartBeat := time.Now()
 	electionTimeout := time.Duration(15 + rand.Intn(15)) * time.Second
+	votes := make(map[int]peer.ID)
 	fmt.Printf("\n[ESTADO] Iniciando rotina FOLLOWER\n")
 
     localCtx, cancel := context.WithCancel(context.Background())
@@ -504,6 +503,7 @@ func followerRoutine(nd *Node, ctx context.Context) {
 
 		lastLiderHeartBeat = time.Now()
 		Npeers = htbmsg.Npeers
+		nd.State.CurrentTerm = htbmsg.Term
 	})
 
     // Canal para sinalizar timeout de eleição
@@ -525,6 +525,22 @@ func followerRoutine(nd *Node, ctx context.Context) {
 				nd.EmbsStaging[cid] = emb
 			}
 		}
+	})
+
+
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.CDTP, func(sender peer.ID, msg any, stop *bool) {
+		cdtpmsg, ok := msg.(messaging.CandidatePorposalMessage)
+		if !ok {
+			fmt.Printf("Esperado CandidatePorposalMessage, obtido %T", cdtpmsg)
+		}
+
+		myTermVote,exists := votes[cdtpmsg.Term]
+
+		if((exists && myTermVote == sender) || !exists && sender != nd.IpfsCore.Identity){
+			go messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.VTP,messaging.VoteMessage{Term: cdtpmsg.Term, Candidate: sender})
+			votes[cdtpmsg.Term] = sender
+		}
+
 	})
 
 	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.AEM, func(sender peer.ID, msg any, stop *bool) {
@@ -639,24 +655,31 @@ func (nd *Node) getPubSubPeersCount(ctx context.Context, topic string) int {
 	return len(peers)
 }
 
-func heartBeatSender(nd *Node) {
+func heartBeatSender(nd *Node, ctx context.Context) {
 	topic := string(messaging.AEM)
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		n := nd.getPubSubPeersCount(ctx, topic)
-		cancel()
-		if n > 0 && Npeers != n {
-			Npeers = n
-			fmt.Printf("[HEARTBEAT] Peers ativos atualizados via PubSub: %d\n", Npeers)
+
+        select {
+        case <-ctx.Done():
+            fmt.Printf("[HEARTBEAT] Cancelando heartbeat sender\n")
+            
+        default:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			n := nd.getPubSubPeersCount(ctx, topic)
+			cancel()
+			if n > 0 && Npeers != n {
+				Npeers = n
+				fmt.Printf("[HEARTBEAT] Peers ativos atualizados via PubSub: %d\n", Npeers)
+			}
+
+			messaging.PublishTo(
+				nd.IpfsApi.PubSub(),
+				messaging.HTB,
+				messaging.HeartBeatMessage{Npeers: Npeers, Term: nd.State.CurrentTerm},
+			)
+
+			time.Sleep(1500 * time.Millisecond) // 1.5 s
 		}
-
-		messaging.PublishTo(
-			nd.IpfsApi.PubSub(),
-			messaging.HTB,
-			messaging.HeartBeatMessage{Npeers: Npeers},
-		)
-
-		time.Sleep(15 * time.Second)
 	}
 }
 
@@ -669,7 +692,7 @@ func liderRoutine(nd *Node, ctx context.Context) {
 
 	go nd.API.Initialize(localCtx,nd,9000)
 
-	go heartBeatSender(nd)
+	go heartBeatSender(nd,localCtx)
 	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.ACK, func(sender peer.ID, msg any, stop *bool) {
 		ackmsg, ok := msg.(messaging.AckMessage)
 		if !ok {
@@ -691,9 +714,36 @@ func liderRoutine(nd *Node, ctx context.Context) {
 }
 
 
+func candidatePorposalSender(nd *Node, ctx context.Context) {
+
+	for {
+
+        select {
+        case <-ctx.Done():
+            fmt.Printf("[CDTP] Cancelando candidate porposal sender\n")
+            
+        default:
+
+			messaging.PublishTo(
+				nd.IpfsApi.PubSub(),
+				messaging.CDTP,
+				messaging.CandidatePorposalMessage{Term: nd.State.CurrentTerm},
+			)
+
+			time.Sleep(15 * time.Second)
+		}
+	}
+
+}
+
+
+
+
 func candidateRoutine(nd *Node, ctx context.Context) {
 
 	fmt.Printf("\n[ESTADO] Iniciando rotina CANDIDATE\n")
+
+	newTerm := nd.State.CurrentTerm + 1
 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -709,13 +759,83 @@ func candidateRoutine(nd *Node, ctx context.Context) {
 		nd.State.StateMux.Lock()
 		nd.State.NdState = LEADER
 		nd.State.StateMux.Unlock()
+		nd.State.CurrentTerm = newTerm
 		return
 
 	}
 
-	// Espera bloqueante (equanto o context não for cancelado)
-	<-ctx.Done()
-	fmt.Printf("\n[ESTADO] Terminando rotina CANDIDATE\n")
+	// Golang não tem sets então pelos vistos é comum utilizar mapas com valores vazios
+
+	votes := map[peer.ID]struct{}{}
+    electedChan := make(chan struct{})
+
+
+    localCtx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.HTB, func(sender peer.ID, msg any, stop *bool) {
+
+		htbmsg, ok := msg.(messaging.HeartBeatMessage)
+		if !ok {
+			fmt.Printf("Esperado HearBeatMessage, obtido %T", msg)
+		}
+
+		if(htbmsg.Term >= newTerm){
+
+			nd.State.StateMux.Lock()
+			nd.State.NdState = FOLLOWER
+			nd.State.StateMux.Unlock()
+			nd.State.CurrentTerm = htbmsg.Term
+			close(electedChan)
+
+
+		}
+
+
+
+	})
+
+
+	go messaging.PublishTo(
+		nd.IpfsApi.PubSub(),
+		messaging.CDTP,
+		messaging.CandidatePorposalMessage{Term: newTerm},
+	)
+
+	
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.VTP, func(sender peer.ID, msg any, stop *bool) {
+
+		voteMsg, ok := msg.(messaging.VoteMessage)
+		if !ok {
+			fmt.Printf("Esperado VoteMessage, obtido %T", msg)
+		}
+
+		if(voteMsg.Term == newTerm && voteMsg.Candidate == nd.IpfsCore.Identity){
+			votes[sender] = struct{}{}
+		}
+
+		if(len(votes)+1 >= (Npeers/2)){
+			close(electedChan)
+
+		}
+
+	})
+
+
+    select {
+		case <-electedChan:
+			fmt.Printf("[FOLLOWER] Timeout detectado - transição para LEADER\n")
+			nd.State.StateMux.Lock()
+			nd.State.NdState = LEADER
+			nd.State.StateMux.Unlock()
+			cancel()
+			return
+		case <-localCtx.Done():
+			fmt.Printf("\n[ESTADO] Terminando rotina CANDIDATE\n")
+			return
+    }
+
 }
 
 // Funções Auxiliares //
