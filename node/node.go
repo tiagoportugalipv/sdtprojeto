@@ -8,6 +8,8 @@ import (
 	"io"
 	"math/rand"
 	"slices"
+	"sync"
+
 	// "log"
 	"os"
 	"strings"
@@ -19,24 +21,26 @@ import (
 	"projeto/types"
 
 	// bibs externas
+	faiss "github.com/DataIntelligenceCrew/go-faiss"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/kubo/config"
 	"github.com/ipfs/kubo/core"
 	"github.com/ipfs/kubo/core/coreapi"
+	iface "github.com/ipfs/kubo/core/coreiface"
+	ifaceOptions "github.com/ipfs/kubo/core/coreiface/options"
 	"github.com/ipfs/kubo/core/node/libp2p"
 	"github.com/ipfs/kubo/plugin/loader"
 	"github.com/ipfs/kubo/repo"
 	"github.com/ipfs/kubo/repo/fsrepo"
 	"github.com/libp2p/go-libp2p/core/peer"
-	faiss "github.com/DataIntelligenceCrew/go-faiss"
-	iface "github.com/ipfs/kubo/core/coreiface"
-	ifaceOptions "github.com/ipfs/kubo/core/coreiface/options"
 )
 
 // Estruturas e Setup //
 var Npeers int = 0 // Npeers na rede
 type Vector = types.Vector
+
+
 
 // Enum de estado
 type NodeState int
@@ -48,6 +52,15 @@ const (
 	LEADER
 )
 
+type State struct {
+
+	NdState NodeState
+	CurrentTerm int
+	VotedFor peer.ID
+	StateMux sync.Mutex
+
+}
+
 // No
 type Node struct {
 	IpfsCore      *core.IpfsNode
@@ -58,10 +71,21 @@ type Node struct {
 	CidsInIndex   []string
 	VectorCache   map[int](Vector)
 	EmbsStaging   map[string]([]float32)
-	State         NodeState // Estado do nó
+
+	// State         NodeState // Estado do nó
+	State State
 	// Lider Stuff
 	StagingAKCs map[int]int
-	CommitDone  chan struct{} // Para depois sinalizar a api para responder ao cliente depois dos COMMITACK
+	API APIInterface
+}
+
+
+type APIInterface interface {
+    Initialize(nd *Node,port int) (error)
+}
+
+func (nd *Node) SetAPI(api APIInterface) {
+    nd.API = api
 }
 
 // Novo repositótio IPFS
@@ -240,9 +264,9 @@ func Create(repoPath string, peers []string) (*Node, error) {
 		npeers, err = connectToPeers(ipfsCoreApi, peers, ipfsCore.Identity.String())
 	}
 
-	state := FOLLOWER
+	ndstate := FOLLOWER
 	if LeaderFlag {
-		state = LEADER
+		ndstate = LEADER
 	}
 
 	emptyVector :=
@@ -250,6 +274,8 @@ func Create(repoPath string, peers []string) (*Node, error) {
 			Ver:     0,
 			Content: []string{},
 		}
+
+		
 
 	n := Node{
 		IpfsCore:      ipfsCore,
@@ -259,12 +285,12 @@ func Create(repoPath string, peers []string) (*Node, error) {
 		CidVector:     emptyVector,
 		CidVectorEmbs: make(map[string]([]float32)),
 		CidsInIndex:   []string{},
-		State:         state,
-	}
-
-	if LeaderFlag {
-		n.CommitDone = make(chan struct{})
-		n.StagingAKCs = make(map[int]int)
+		State:         State{
+						NdState: ndstate,
+						CurrentTerm: 0,
+						VotedFor: ipfsCore.Identity,
+						StateMux: sync.Mutex{},
+					   },
 	}
 
 	var faissErr error
@@ -305,7 +331,7 @@ func (nd *Node) Run() {
 			fmt.Printf("[REBUILD-REQ] A processar rebuild para peer: %v\n", sender)
 			response := make(map[string][]float32)
 			if len(rblqmsg.Info) == 0 {
-				go messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.RBLR, messaging.RebuildResponseMessage{Response: nd.CidVectorEmbs, Dest: sender, Total: true})
+				go messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.RBLR, messaging.RebuildResponseMessage{Response: nd.CidVectorEmbs, Dest: sender})
 				return
 			}
 
@@ -315,17 +341,30 @@ func (nd *Node) Run() {
 					response[cid] = emb
 				}
 			}
-			go messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.RBLR, messaging.RebuildResponseMessage{Response: response, Dest: sender, Total: false})
+			go messaging.PublishTo(nd.IpfsApi.PubSub(), messaging.RBLR, messaging.RebuildResponseMessage{Response: response, Dest: sender})
 			return
 		}
 
 	})
-	switch nd.State {
-	case LEADER:
-		liderRoutine(nd, ctx)
-	default:
-		followerRoutine(nd, ctx)
-	}
+
+    for {
+
+		nd.State.StateMux.Lock()
+        state := nd.State.NdState
+		nd.State.StateMux.Unlock()
+        
+        switch state {
+        case FOLLOWER:
+			nd.StagingAKCs = nil
+			followerRoutine(nd, ctx)
+        case CANDIDATE:
+			candidateRoutine(nd, ctx)
+        case LEADER:
+			nd.StagingAKCs = make(map[int]int)
+			liderRoutine(nd, ctx)
+        }
+    }
+
 }
 
 // Follower
@@ -341,6 +380,7 @@ func receiveNewVector(nd *Node, v Vector, embs []float32) {
 }
 
 func receiveCommit(nd *Node, version int) {
+
 	fmt.Printf("\n[COMMIT] Processando versão %d\n", version)
 	fmt.Printf("[COMMIT] Vetor na cache (v%d): %v\n", version, nd.VectorCache[version].Content)
 	fmt.Printf("[COMMIT] Vetor CID atual: %v\n", nd.CidVector.Content)
@@ -416,14 +456,22 @@ func receiveCommit(nd *Node, version int) {
 }
 
 //func heartBeatCheck(nd *Node){
-func heartBeatCheck(lastLiderHeartBeat *time.Time) {
-	for {
-		if time.Since(*lastLiderHeartBeat) >= (30 * time.Second) {
-			fmt.Printf("[HEARTBEAT] Timeout do líder detectado - iniciando eleição\n")
-			//TODO passar para rotina de eleicao
-		}
-		time.Sleep(15 * time.Second)
-	}
+func heartBeatCheck(lastLiderHeartBeat *time.Time, electionTimeout time.Duration, timeoutChan chan struct{}, ctx context.Context) {
+    ticker := time.NewTicker(10 * time.Millisecond)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ticker.C:
+            if time.Since(*lastLiderHeartBeat) >= electionTimeout {
+                fmt.Printf("[HEARTBEAT] Timeout do líder detectado - iniciando eleição\n")
+                close(timeoutChan)
+                return
+            }
+        case <-ctx.Done():
+            return
+        }
+    }
 }
 
 func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID, error) {
@@ -441,6 +489,7 @@ func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID,
 func followerRoutine(nd *Node, ctx context.Context) {
 	// Assumimos o primeiro beat na rotina follower
 	lastLiderHeartBeat := time.Now().Add(15 * time.Second)
+	electionTimeout := time.Duration(150 + rand.Intn(150)) * time.Millisecond
 	fmt.Printf("\n[ESTADO] Iniciando rotina FOLLOWER\n")
 
 	// TODO Alterar para depois acomodar o processo de eleicao
@@ -453,7 +502,15 @@ func followerRoutine(nd *Node, ctx context.Context) {
 		lastLiderHeartBeat = time.Now()
 		Npeers = htbmsg.Npeers
 	})
-	go heartBeatCheck(&lastLiderHeartBeat)
+
+    // Canal para sinalizar timeout de eleição
+    timeoutChan := make(chan struct{})
+    
+    // Context local para cancelar todas as goroutines desta rotina
+    localCtx, cancel := context.WithCancel(ctx)
+    defer cancel()
+
+    go heartBeatCheck(&lastLiderHeartBeat, electionTimeout, timeoutChan, localCtx)
 
 	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.RBLR, func(sender peer.ID, msg any, stop *bool) {
 		rblrmsg, ok := msg.(messaging.RebuildResponseMessage)
@@ -492,9 +549,18 @@ func followerRoutine(nd *Node, ctx context.Context) {
 		fmt.Printf("[COMMIT-MSG] Vetor atualizado (v%d):\n%v\n", nd.CidVector.Ver, nd.CidVector.String())
 	})
 
-	// Espera bloqueante (equanto o context não for cancelado)
-	<-ctx.Done()
-	fmt.Printf("\n[ESTADO] Terminando rotina FOLLOWER\n")
+    select {
+		case <-timeoutChan:
+			fmt.Printf("[FOLLOWER] Timeout detectado - transição para CANDIDATE\n")
+			nd.State.StateMux.Lock()
+			nd.State.NdState = CANDIDATE
+			nd.State.StateMux.Unlock()
+			cancel()
+			return
+		case <-localCtx.Done():
+			fmt.Printf("\n[ESTADO] Terminando rotina FOLLOWER\n")
+			return
+    }
 }
 
 // Lider
@@ -596,6 +662,9 @@ func heartBeatSender(nd *Node) {
 
 func liderRoutine(nd *Node, ctx context.Context) {
 	fmt.Printf("\n[ESTADO] Iniciando rotina LEADER\n")
+
+	go nd.API.Initialize(nd,9000)
+
 	go heartBeatSender(nd)
 	go messaging.ListenTo(nd.IpfsApi.PubSub(), messaging.ACK, func(sender peer.ID, msg any, stop *bool) {
 		ackmsg, ok := msg.(messaging.AckMessage)
@@ -615,6 +684,34 @@ func liderRoutine(nd *Node, ctx context.Context) {
 	// Espera bloqueante (equanto o context não for cancelado)
 	<-ctx.Done()
 	fmt.Printf("\n[ESTADO] Terminando rotina LEADER\n")
+}
+
+
+func candidateRoutine(nd *Node, ctx context.Context) {
+
+	fmt.Printf("\n[ESTADO] Iniciando rotina CANDIDATE\n")
+
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	n := nd.getPubSubPeersCount(ctx, string(messaging.RBLQ))
+	cancel()
+
+
+	Npeers = n
+	fmt.Printf("[CANDIDATE PEERCOUNT] Peers ativos atualizados via PubSub: %d\n", Npeers)
+
+	if(Npeers <= 1){
+
+		nd.State.StateMux.Lock()
+		nd.State.NdState = LEADER
+		nd.State.StateMux.Unlock()
+		return
+
+	}
+
+	// Espera bloqueante (equanto o context não for cancelado)
+	<-ctx.Done()
+	fmt.Printf("\n[ESTADO] Terminando rotina CANDIDATE\n")
 }
 
 // Funções Auxiliares //

@@ -28,7 +28,6 @@ func main() {
 	var peers []string
 	var nd *node.Node
 	var err error
-	var apiPort = 9000
 
 	flag.StringVar(&repoPath,"r",".ipfs","repositório ipfs")
 	flag.BoolVar(&leaderFlag,"l",false,"Iniciar o nó a lider [para testes]")
@@ -177,9 +176,12 @@ func main() {
 	//
 	// }
 
-	if(leaderFlag){
-		go api.Initialize(nd,apiPort)
-	}
+	// if(leaderFlag){
+	// 	go api.Initialize(nd,apiPort)
+	// }
+
+	apiInterface := api.APIInterface{NodeId: nd.IpfsCore.Identity.String()}
+	nd.SetAPI(&apiInterface)
 
 	nd.Run()
 

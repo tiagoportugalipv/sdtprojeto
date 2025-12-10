@@ -26,8 +26,10 @@ const (
     ACK Topico = "ack" // Topico Ack
     COMM Topico = "commit" // Topico Commit
     HTB Topico = "heartbeat" // Topico Heartbeat
-    RBLQ Topico = "rebuildquery" // Topico Rebuild
-    RBLR Topico = "rebuildreponse" // Topico Rebuild
+    RBLQ Topico = "rebuildquery" // Topico RebuildQuery
+    RBLR Topico = "rebuildreponse" // Topico RebuildResponse
+    CDTP Topico = "candidateproposal" // Topico CandidatePorposal
+    VTP  Topico = "votingpool" // Topico VotingPool
 )
 
 
@@ -63,8 +65,16 @@ type RebuildQueryMessage struct {
 
 type RebuildResponseMessage struct {
     Response map[string][]float32
-    Total bool
     Dest peer.ID
+}
+
+type CandidatePorposalMessage struct {
+    Term int
+}
+
+type VoteMessage struct {
+    Term int
+    Candidate peer.ID
 }
 
 
@@ -160,9 +170,29 @@ func decodeMessage(data []byte,topico Topico) (any,error){
         var rebuildResponseMsg RebuildResponseMessage
         if err := decoder.Decode(&rebuildResponseMsg); err != nil {
         fmt.Println(err)
-            return nil,fmt.Errorf("Erro ao decodificar JoinMessage: %v", err)
+            return nil,fmt.Errorf("Erro ao decodificar RebuildQueryResponse: %v", err)
         }
         msg = rebuildResponseMsg
+
+    case CDTP:
+
+        var candidatePorposalMsg CandidatePorposalMessage
+        if err := decoder.Decode(&candidatePorposalMsg); err != nil {
+        fmt.Println(err)
+            return nil,fmt.Errorf("Erro ao decodificar CadidatePorposalMessage: %v", err)
+        }
+        msg = candidatePorposalMsg
+
+
+    case VTP:
+
+        var voteMsg VoteMessage
+        if err := decoder.Decode(&voteMsg); err != nil {
+        fmt.Println(err)
+            return nil,fmt.Errorf("Erro ao decodificar VoteMessage: %v", err)
+        }
+        msg = voteMsg
+        
 
     default:
         return nil,fmt.Errorf("Topico desconhecido: %v", topico)

@@ -12,7 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Initialize(nd *node.Node,port int) (error){
+
+type APIInterface struct {
+	NodeId string
+}
+
+func (api *APIInterface) Initialize(nd *node.Node,port int) (error){
 
 	gin.SetMode(gin.ReleaseMode)
 	
