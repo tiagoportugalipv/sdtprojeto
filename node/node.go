@@ -325,11 +325,15 @@ func Create(repoPath string, peers []string) (*Node, error) {
 func (nd *Node) AddFile(fileBytes []byte, embs []float32) (uuid.UUID, error) {
 
 	requestUUID := uuid.New()
+	fmt.Printf("[REQUEST] Criado AddFile request UUID: %v\n", requestUUID)
+
 	nd.RequestQueue[requestUUID] = &RequestQueueEntry {
 		Done: make(chan struct{}),
 		Success: false,
 		Type: types.ADDREQUEST,
 	}
+
+	fmt.Printf("[REQUEST-QUEUE] Request %v adicionado à fila (tipo: ADD)\n", requestUUID)
 
 	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -356,8 +360,11 @@ func (nd *Node) AddFile(fileBytes []byte, embs []float32) (uuid.UUID, error) {
 	    Content: append(currentVector.Content,fileCid.String()),
 	}
 
+	fmt.Printf("[REQUEST] AddFile - Npeers: %d, newVersion: %d\n", Npeers, newVersion)
+
 	if(Npeers == 0){
-	    fmt.Println("Não tenho peers portanto vou simplesmente dar commit")
+	    fmt.Printf("[REQUEST] Sem peers - vou atuar sozinho\n")
+
 	    nd.CidVector = newVector
 	    nd.CidVectorEmbs[fileCid.String()] = embs 
 	    nd.SearchIndex.Add(embs)
@@ -372,6 +379,8 @@ func (nd *Node) AddFile(fileBytes []byte, embs []float32) (uuid.UUID, error) {
 
 	nd.RequestQueue[requestUUID].Arg = fileCid.String()
 	nd.VectorCache[newVersion] = newVector
+	fmt.Printf("[REQUEST] VectorCache atualizado - versão %d adicionada\n", newVersion)
+
 	nd.EmbsStaging[fileCid.String()] = embs 
 
 	msg := messaging.AppendEntryMessage{
@@ -393,6 +402,8 @@ func (nd *Node) MakeRequest(arg string, reqType int) (uuid.UUID, error) {
 		Success: false,
 		Type: RequestType(reqType),
 	}
+
+	fmt.Printf("[REQUEST] Criado MakeRequest UUID: %v, tipo: %d, arg: %s\n", requestUUID, reqType, arg)
 
 
 	if(Npeers == 0){
