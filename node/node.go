@@ -315,6 +315,45 @@ func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath, error) {
 	return fileCid, err
 }
 
+
+func (nd *Node) GetFile(cidPathString string) ([]byte,error) {
+
+	getCtx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	cidPath,err := path.NewPath(cidPathString)
+	cidPath,err = path.NewImmutablePath(cidPath)
+
+	requestedCidNode,err := nd.IpfsApi.Unixfs().Get(getCtx,cidPath)
+
+	file,ok := requestedCidNode.(files.File)
+
+	var requestedFileBytes []byte = nil
+
+	if(ok){
+	   requestedFileBytes,err = io.ReadAll(file)
+	}
+
+	return requestedFileBytes,err
+
+}
+
+
+func (nd *Node) GetCidFromPrompt(prompt string) (string,error) {
+
+	promptEmbs,err := embedding.GetEmbeddings(prompt)
+	_,cidIndexes,err := nd.SearchIndex.Search(promptEmbs,1)
+
+	searchResultIndex := cidIndexes[0]
+	var searchResultCid string = ""
+
+	if(int(searchResultIndex) < len(nd.CidVector.Content) && err != nil){
+		searchResultCid = nd.CidVector.Content[int(searchResultIndex)]
+	}
+
+	return searchResultCid,err
+}
+
 func (nd *Node) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

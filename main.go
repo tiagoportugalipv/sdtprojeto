@@ -16,7 +16,6 @@ import (
 	"projeto/node"
 	"projeto/services/embedding"
 
-	// bibs externas
 )
 
 func main() {
@@ -53,7 +52,6 @@ func main() {
 		panic(err)
 	}
 
-	// Leitura de peers para criação do nó
 
 	peers = nil
 
@@ -98,15 +96,6 @@ func main() {
 	fmt.Printf("\tModelo iniciado com sucesso\n\n")
 
 
-	// Teste de funcionamento do modelo de embeddings
-
-	// embs,err := embedding.GetEmbeddings(peers)
-	//
-	// dimension := len(embs[0])
-	// fmt.Printf("Número de linhas: %d\n", len(embs))
-	// fmt.Printf("Dimensão dos embeddings: %d\n", dimension)
-
-
 	fmt.Printf("==> A criar nó\n\n")
 
 	nd,err = node.Create(repoPath,peers)
@@ -123,62 +112,6 @@ func main() {
 
 	fmt.Printf("\tNó criado com sucesso\n\n")
 
-	// Teste de funcionamento do IPFS
-
-	// 	file, err := os.Open("files/sample.md")
-	// 	fileBytes, err := io.ReadAll(file)
-	// 
-	// 	fileCid, err := node.AddFile(nd,fileBytes)
-	//
-	// 	fmt.Printf("Cid: %v",fileCid)
-	// 	file.Close()
-
-	// Teste de funcionamento do PubSub
-
-	// if(leaderFlag){
-	//
-	//
-	// 	fmt.Printf("==>A correr Api na porta %d\n",apiPort)
-	//
-	// 	err := messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.TXT,messaging.TextMessage{Text: "Olá eu sou o lider"})
-	//
-	//
-	// 	if(err != nil){
-	// 		fmt.Printf("Mensagem não enviada com sucesso: v%\n",err)
-	// 	}
-	//
-	// 	err = api.Initialize(nd,apiPort)
-	//
-	// 	if(err != nil){
-	// 		fmt.Printf("Api não foi iniciada com sucesso\n")
-	// 	}
-	//
-	// } else {
-	//
-	//
-	// 	fmt.Printf("==>A ouvir mensagens\n")
-	//
-	// 	err = messaging.ListenTo(nd.IpfsApi.PubSub(),messaging.TXT,func(sender peer.ID, msg any) {
-	//
-	// 		textMsg,ok := msg.(messaging.TextMessage)
-	//
-	// 		if(!ok){
-	// 			fmt.Printf("Esperado TextMessage, obtido %T", msg)
-	// 		}
-	//
-	// 		fmt.Println(textMsg.Text)
-	// 	})
-	//
-	//
-	// 	if(err != nil){
-	// 		fmt.Printf("Mensagem não recebida com sucesso: v%\n",err)
-	// 	}
-	//
-	// }
-
-	// if(leaderFlag){
-	// 	go api.Initialize(nd,apiPort)
-	// }
 
 	apiInterface := api.APIInterface{NodeId: nd.IpfsCore.Identity.String()}
 	nd.SetAPI(&apiInterface)

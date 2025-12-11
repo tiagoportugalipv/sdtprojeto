@@ -79,6 +79,33 @@ type VoteMessage struct {
     Candidate peer.ID
 }
 
+type ResquestType int
+
+
+const (
+    ADD ResquestType = 1
+    PROMPT ResquestType = 2
+    GET ResquestType = 3
+)
+
+type ClientRequest struct {
+
+    RequestUUID []byte
+    Type ResquestType
+    Arg string
+
+}
+
+type ClientResponse struct {
+
+    RequestUUID []byte
+    Age int
+    Success bool
+    
+
+
+}
+
 // Raft timings
 
 
