@@ -31,6 +31,8 @@ const (
     RBLR Topico = "rebuildreponse" // Topico RebuildResponse
     CDTP Topico = "candidateproposal" // Topico CandidatePorposal
     VTP  Topico = "votingpool" // Topico VotingPool
+    CRQ  Topico = "clientrequest" // Topico ClientResquest
+    CRP  Topico = "clientresponse" // Topico ClientResponse
 )
 
 
@@ -86,14 +88,15 @@ type ClientRequest struct {
 
     RequestUUID []byte
     Type ResquestType
+    Age int
     Arg string
+    Dest peer.ID
 
 }
 
 type ClientResponse struct {
 
     RequestUUID []byte
-    Age int
     Success bool
     Response interface{}
 
@@ -215,6 +218,22 @@ func decodeMessage(data []byte,topico Topico) (any,error){
             return nil,fmt.Errorf("Erro ao decodificar VoteMessage: %v", err)
         }
         msg = voteMsg
+
+    case CRQ:
+        var clientRequestMsg ClientRequest
+        if err := decoder.Decode(&clientRequestMsg); err != nil {
+        fmt.Println(err)
+            return nil,fmt.Errorf("Erro ao decodificar ClientRequestMessage: %v", err)
+        }
+        msg = clientRequestMsg
+
+    case CRP:
+        var clientResponseMsg ClientResponse
+        if err := decoder.Decode(&clientResponseMsg); err != nil {
+        fmt.Println(err)
+            return nil,fmt.Errorf("Erro ao decodificar clientResponseMessage: %v", err)
+        }
+        msg = clientResponseMsg
         
 
     default:

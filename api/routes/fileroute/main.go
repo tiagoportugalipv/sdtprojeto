@@ -18,4 +18,14 @@ func SetUpRoutes(rg *gin.RouterGroup, nd *node.Node ) {
 		filecontroller.UploadFile(ctx, nd)
 	})
 
+
+	rg.GET("/retreive", func(ctx *gin.Context) {
+		filecontroller.GetFile(ctx, nd)
+	})
+
+
+	rg.GET("/prompt", func(ctx *gin.Context) {
+		filecontroller.GetCidFromPrompt(ctx, nd)
+	})
+
 }

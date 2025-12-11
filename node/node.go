@@ -360,6 +360,7 @@ func (nd *Node) AddFile(fileBytes []byte, embs []float32) (uuid.UUID, error) {
 	    fmt.Println("Não tenho peers portanto vou simplesmente dar commit")
 	    nd.CidVector = newVector
 	    nd.CidVectorEmbs[fileCid.String()] = embs 
+	    nd.SearchIndex.Add(embs)
 
 	    
 	    nd.RequestQueue[requestUUID].Response = fileCid.String()
@@ -381,6 +382,84 @@ func (nd *Node) AddFile(fileBytes []byte, embs []float32) (uuid.UUID, error) {
 	err = messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.AEM,msg)
 
 	return requestUUID,err
+}
+
+
+func (nd *Node) MakeRequest(arg string, reqType int) (uuid.UUID, error) {
+
+	requestUUID := uuid.New()
+	nd.RequestQueue[requestUUID] = &RequestQueueEntry {
+		Done: make(chan struct{}),
+		Success: false,
+		Type: RequestType(reqType),
+	}
+
+
+	if(Npeers == 0){
+
+		if(RequestType(reqType) == types.GETREQUEST){
+
+			filebytes,err := nd.GetFile(arg)
+
+			if(err != nil){
+				nd.RequestQueue[requestUUID].Response = nil
+				return requestUUID,err
+			}
+
+
+			nd.RequestQueue[requestUUID].Success = true
+			nd.RequestQueue[requestUUID].Response = filebytes
+			close(nd.RequestQueue[requestUUID].Done)
+
+			return requestUUID,err
+
+		} else if (RequestType(reqType) == types.PROMPTREQUEST) {
+
+			cid,err := nd.GetCidFromPrompt(arg)
+
+
+			if(err != nil){
+				fmt.Println(err)
+				nd.RequestQueue[requestUUID].Response = nil
+				return requestUUID,err
+			}
+
+
+			nd.RequestQueue[requestUUID].Success = true
+			nd.RequestQueue[requestUUID].Response = cid
+			close(nd.RequestQueue[requestUUID].Done)
+
+			return requestUUID,err
+			
+			
+		} else {
+			err:=fmt.Errorf("Tipo de pedido não conhecido")
+			return requestUUID,err
+
+		}
+
+	}
+
+
+	rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	randomPeer,_ := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ),false)
+	cancel()
+
+	reqUUIDBytes,_ := requestUUID.MarshalBinary()
+
+	req := messaging.ClientRequest{
+		RequestUUID: reqUUIDBytes,
+		Type: messaging.ResquestType(reqType),
+		Age: 0,
+		Arg: arg,
+		Dest: randomPeer,
+	}
+
+	messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRQ,req)
+
+
+	return requestUUID,nil
+
 }
 
 
@@ -415,7 +494,7 @@ func (nd *Node) GetCidFromPrompt(prompt string) (string,error) {
 	searchResultIndex := cidIndexes[0]
 	var searchResultCid string = ""
 
-	if(int(searchResultIndex) < len(nd.CidVector.Content) && err != nil){
+	if(int(searchResultIndex) < len(nd.CidVector.Content) && int(searchResultIndex) >= 0 && err == nil){
 		searchResultCid = nd.CidVector.Content[int(searchResultIndex)]
 	}
 
@@ -545,7 +624,7 @@ func receiveCommit(nd *Node, version int) {
 	// Pedir embeddings em falta se houver
 	if len(missing) > 0 {
 		rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		randomPeer, error := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ))
+		randomPeer, error := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ),true)
 		cancel()
 		if error == nil {
 			fmt.Printf("[COMMIT] A solicitar rebuild ao peer %v para %d CIDs\n", randomPeer, len(missing))
@@ -581,7 +660,7 @@ func heartBeatCheck(lastLiderHeartBeat *time.Time, electionTimeout time.Duration
     }
 }
 
-func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID, error) {
+func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string, liderInPoll bool) (peer.ID, error) {
 	ps := nd.IpfsApi.PubSub()
 	peers, err := ps.Peers(ctx, ifaceOptions.PubSub.Topic(topic))
 	if err != nil {
@@ -591,18 +670,22 @@ func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID,
 
 	leaderIdx := -1
 
-	// Remover Lider https://stackoverflow.com/a/37335777
-	for i := 0; i<len(peers); i++ {
+	if(!liderInPoll){
 
-		if(peers[i]== nd.Leader){
-			leaderIdx = i
-			break
+		// Remover Lider https://stackoverflow.com/a/37335777
+		for i := 0; i<len(peers); i++ {
+
+			if(peers[i]== nd.Leader){
+				leaderIdx = i
+				break
+			}
 		}
-	}
 
-	if(leaderIdx > 0){
-		peers[leaderIdx] = peers[len(peers)-1]
-		peers = peers[:len(peers)-1]
+		if(leaderIdx > 0){
+			peers[leaderIdx] = peers[len(peers)-1]
+			peers = peers[:len(peers)-1]
+		}
+	
 	}
 
 	idx := rand.Intn(len(peers))
@@ -688,6 +771,138 @@ func followerRoutine(nd *Node, ctx context.Context) {
 
 		receiveCommit(nd, commMgs.Version)
 		fmt.Printf("[COMMIT-MSG] Vetor atualizado (v%d):\n%v\n", nd.CidVector.Ver, nd.CidVector.String())
+	})
+
+
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.CRP, func(sender peer.ID, msg any, stop *bool) {
+
+
+		clrp, ok := msg.(messaging.ClientResponse)
+		if !ok {
+			fmt.Printf("Esperado ClientResponse, obtido %T", msg)
+			return
+		}
+
+
+		var requestUUID uuid.UUID
+		requestUUID.UnmarshalBinary(clrp.RequestUUID)
+
+		var pr int = -1
+
+		for  idx,prUuid := range nd.ProcessedRequests {
+
+			if(prUuid == requestUUID){
+				pr = idx
+				break
+			}
+		}
+
+		if pr >= 0 {
+			nd.ProcessedRequests[pr] = nd.ProcessedRequests[len(nd.ProcessedRequests)-1]
+			nd.ProcessedRequests = nd.ProcessedRequests[:len(nd.ProcessedRequests)-1]
+		}
+
+		
+
+	})
+
+
+
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.CRQ, func(sender peer.ID, msg any, stop *bool) {
+
+
+		clrq, ok := msg.(messaging.ClientRequest)
+		if !ok {
+			fmt.Printf("Esperado ClientRequest, obtido %T", msg)
+		}
+
+		if(clrq.Dest == nd.IpfsCore.Identity){
+
+
+			var requestUUID uuid.UUID
+			requestUUID.UnmarshalBinary(clrq.RequestUUID)
+
+			if(slices.Contains(nd.ProcessedRequests,requestUUID)){
+
+				if(clrq.Age > 10){
+
+					messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRP,messaging.ClientResponse{
+						RequestUUID: clrq.RequestUUID,
+						Success: false,
+						Response: nil,
+					})
+
+				}
+
+				rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				randomPeer,_ := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ),false)
+				cancel()
+
+				clrq.Dest = randomPeer
+				clrq.Age = clrq.Age+1
+
+				messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRQ,clrq)
+				return
+
+			}
+
+
+			nd.ProcessedRequests = append(nd.ProcessedRequests, requestUUID)
+
+
+			if(clrq.Type == messaging.ResquestType(types.GETREQUEST)){
+
+				fileBytes,err := nd.GetFile(clrq.Arg)
+
+				if(err != nil){
+
+					rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					randomPeer,_ := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ),false)
+					cancel()
+
+					clrq.Dest = randomPeer
+					clrq.Age = clrq.Age+1
+
+					messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRQ,clrq)
+
+				} else {
+
+					messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRP,messaging.ClientResponse{
+						RequestUUID: clrq.RequestUUID,
+						Success: true,
+						Response: fileBytes,
+					})
+					
+				}
+			} else if (clrq.Type == messaging.ResquestType(types.PROMPTREQUEST)){
+
+				cid,err := nd.GetCidFromPrompt(clrq.Arg)
+
+				if(err != nil){
+
+					rpeerctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					randomPeer,_ := nd.getPubSubRandomPeer(rpeerctx, string(messaging.RBLQ),false)
+					cancel()
+
+					clrq.Dest = randomPeer
+					clrq.Age = clrq.Age+1
+
+					messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRQ,clrq)
+
+				} else {
+
+					messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.CRP,messaging.ClientResponse{
+						RequestUUID: clrq.RequestUUID,
+						Success: true,
+						Response: cid,
+					})
+					
+				}
+				
+			} 
+		}
+
+
 	})
 
     select {
@@ -839,6 +1054,27 @@ func liderRoutine(nd *Node, ctx context.Context) {
 			fmt.Printf("[ACK] Hash inválida para vetor:\n%v\n", nd.CidVector.String())
 			fmt.Printf("[ACK] Validação falhou\n")
 		}
+
+	})
+
+
+	go messaging.ListenTo(localCtx,nd.IpfsApi.PubSub(), messaging.CRP, func(sender peer.ID, msg any, stop *bool) {
+
+
+		clrp, ok := msg.(messaging.ClientResponse)
+		if !ok {
+			fmt.Printf("Esperado ClientResponse, obtido %T", msg)
+			return
+		}
+
+
+		var requestUUID uuid.UUID
+		requestUUID.UnmarshalBinary(clrp.RequestUUID)
+
+		nd.RequestQueue[requestUUID].Success = clrp.Success
+		nd.RequestQueue[requestUUID].Response = clrp.Response
+		close(nd.RequestQueue[requestUUID].Done)
+		
 
 	})
 
