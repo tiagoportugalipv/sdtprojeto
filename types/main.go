@@ -26,9 +26,9 @@ type ResquestType int
 
 
 const (
-    ADD ResquestType = 1
-    PROMPT ResquestType = 2
-    GET ResquestType = 3
+    ADDREQUEST ResquestType = 1
+    PROMPTREQUEST ResquestType = 2
+    GETREQUEST ResquestType = 3
 )
 
 

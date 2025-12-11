@@ -68,6 +68,7 @@ type RequestQueueEntry struct {
 	Success bool
 	Type RequestType
 	Response interface{}
+	Arg string
 
 }
 
@@ -88,7 +89,7 @@ type Node struct {
 	// Lider Stuff
 	StagingAKCs map[int]int
 	API APIInterface
-	RequestQueue map[uuid.UUID]RequestQueueEntry
+	RequestQueue map[uuid.UUID]*RequestQueueEntry
 
 
 	// Follower Stuff
@@ -321,7 +322,15 @@ func Create(repoPath string, peers []string) (*Node, error) {
 
 // Metodos //
 // Upload de ficheiros
-func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath, error) {
+func (nd *Node) AddFile(fileBytes []byte, embs []float32) (uuid.UUID, error) {
+
+	requestUUID := uuid.New()
+	nd.RequestQueue[requestUUID] = &RequestQueueEntry {
+		Done: make(chan struct{}),
+		Success: false,
+		Type: types.ADDREQUEST,
+	}
+
 	uploadCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	fileCid, err := nd.IpfsApi.Unixfs().Add(uploadCtx, files.NewBytesFile(fileBytes))
@@ -329,7 +338,49 @@ func (nd *Node) AddFile(fileBytes []byte) (path.ImmutablePath, error) {
 		err = fmt.Errorf("Erro ao dar upload de ficheiro: %v\n", err)
 	}
 
-	return fileCid, err
+
+	currentVector := nd.CidVector
+	newVersion := nd.CidVector.Ver;
+
+	for k := range(nd.VectorCache){
+	    if(k > newVersion){
+		newVersion = k
+	    }
+	}
+
+	newVersion = newVersion + 1 
+	fmt.Printf("Nova versão : %v \n",newVersion)
+
+	newVector := Vector {
+	    Ver: newVersion,
+	    Content: append(currentVector.Content,fileCid.String()),
+	}
+
+	if(Npeers == 0){
+	    fmt.Println("Não tenho peers portanto vou simplesmente dar commit")
+	    nd.CidVector = newVector
+	    nd.CidVectorEmbs[fileCid.String()] = embs 
+
+	    
+	    nd.RequestQueue[requestUUID].Response = fileCid.String()
+	    nd.RequestQueue[requestUUID].Success = true
+	    close(nd.RequestQueue[requestUUID].Done)
+	    return requestUUID, nil
+	}
+
+
+	nd.RequestQueue[requestUUID].Arg = fileCid.String()
+	nd.VectorCache[newVersion] = newVector
+	nd.EmbsStaging[fileCid.String()] = embs 
+
+	msg := messaging.AppendEntryMessage{
+	     Vector: newVector,
+	     Embeddings: embs,
+	}
+
+	err = messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.AEM,msg)
+
+	return requestUUID,err
 }
 
 
@@ -414,6 +465,7 @@ func (nd *Node) Run() {
         case CANDIDATE:
 		candidateRoutine(nd, ctx)
         case LEADER:
+		nd.RequestQueue = make(map[uuid.UUID]*RequestQueueEntry)
 		nd.Leader = nd.IpfsCore.Identity
 		nd.StagingAKCs = make(map[int]int)
 		liderRoutine(nd, ctx)
@@ -671,6 +723,7 @@ func receiveAck(nd *Node, hash string, version int) bool {
     fmt.Printf("Numeros de ACKs para a versao %v: %v/%v\n", version, nd.StagingAKCs[version], Npeers)
 
     if nd.StagingAKCs[version] >= int(Npeers/2) {
+
         fmt.Println("Vou dar commit")
         nd.CidVector = nd.VectorCache[version]
 
@@ -710,6 +763,14 @@ func receiveAck(nd *Node, hash string, version int) bool {
                 delete(nd.VectorCache, k)
             }
         }
+
+	for requestUUID,entry := range nd.RequestQueue {
+		if(entry.Type == types.ADDREQUEST && slices.Contains(nd.CidVector.Content,entry.Arg)){
+			nd.RequestQueue[requestUUID].Response = entry.Arg
+			nd.RequestQueue[requestUUID].Success = true
+			close(nd.RequestQueue[requestUUID].Done)
+		}
+	}
     } else {
         fmt.Println("Não vou dar commit")
     }

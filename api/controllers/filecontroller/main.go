@@ -4,11 +4,11 @@ import (
 
 	// bibs padrão
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+        "time"
 
 	// bibs externas
 	"github.com/gin-gonic/gin"
@@ -16,8 +16,6 @@ import (
 	// bibs internas
 	"projeto/node"
 	"projeto/services/embedding"
-	"projeto/services/messaging"
-	// "projeto/types"
 )
 
 func UploadFile(ctx *gin.Context, nd *node.Node) {
@@ -77,47 +75,42 @@ func UploadFile(ctx *gin.Context, nd *node.Node) {
 
     uploadedFile.Close()
 
-    fileCid, err := nd.AddFile(fileBytes)
+    requestUUID, err := nd.AddFile(fileBytes,embs)
 
-    if err != nil {
-        ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao submeter ficheiro para o ipfs"})
-        return
-    }
 
-    currentVector := nd.CidVector
-    newVersion := nd.CidVector.Ver;
+    select {
+    case <-nd.RequestQueue[requestUUID].Done:
+        // Request completou com sucesso
+        var fileCid string
 
-    for k := range(nd.VectorCache){
-        if(k > newVersion){
-            newVersion = k
+        if nd.RequestQueue[requestUUID].Success {
+            fileCid, _ = nd.RequestQueue[requestUUID].Response.(string)
+
+            ctx.JSON(http.StatusOK, gin.H{
+                "message":  "File added successfully, CID : " + fileCid,
+                "filename": file.Filename,
+                "cid":      fileCid,
+            })
+        } else {
+            // Tratamento de falha
+            ctx.JSON(http.StatusInternalServerError, gin.H{
+                "error": "Request failed",
+            })
         }
+
+
+    case <-time.After(2 * time.Minute):
+        // Timeout após 2 minutos
+        ctx.JSON(http.StatusRequestTimeout, gin.H{
+            "error": "Request timeout after 2 minutes",
+        })
+        
     }
 
-    newVersion = newVersion + 1 
-    fmt.Printf("Nova versão : %v \n",newVersion)
 
-    newVector := node.Vector {
-         Ver: newVersion,
-         Content: append(currentVector.Content,fileCid.String()),
-    }
+    delete(nd.RequestQueue, requestUUID)
 
-    nd.VectorCache[newVersion] = newVector
-    nd.EmbsStaging[fileCid.String()] = embs 
 
-    msg := messaging.AppendEntryMessage{
-            Vector: newVector,
-            Embeddings: embs,
-    }
 
-    err = messaging.PublishTo(nd.IpfsApi.PubSub(),messaging.AEM,msg)
 
-    if(err != nil){
-        log.Printf("Falha ao enviar estrutura: %v",err) 
-    }
-
-    ctx.JSON(http.StatusOK, gin.H{
-        "message": "File added successfully, CID : "+fileCid.String(),
-        "filename": file.Filename,
-        "cid": fileCid.String(),
-    })
 }
