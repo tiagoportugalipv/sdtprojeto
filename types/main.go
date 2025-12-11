@@ -22,6 +22,17 @@ type CidVectorEmbsEntry struct {
 }
 
 
+type ResquestType int
+
+
+const (
+    ADD ResquestType = 1
+    PROMPT ResquestType = 2
+    GET ResquestType = 3
+)
+
+
+
 func (v Vector) Hash() (string) {
 
     // Nota : não utilizar gob para gerar hashes se não temos o caldo entornado

@@ -21,6 +21,7 @@ import (
 	"projeto/types"
 
 	// bibs externas
+	"github.com/google/uuid"
 	faiss "github.com/DataIntelligenceCrew/go-faiss"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/path"
@@ -39,6 +40,7 @@ import (
 // Estruturas e Setup //
 var Npeers int = 0 // Npeers na rede
 type Vector = types.Vector
+type RequestType = types.ResquestType
 
 
 
@@ -60,6 +62,15 @@ type State struct {
 
 }
 
+type RequestQueueEntry struct {
+
+	Done chan struct{}
+	Success bool
+	Type RequestType
+	Response interface{}
+
+}
+
 // No
 type Node struct {
 	IpfsCore      *core.IpfsNode
@@ -70,12 +81,18 @@ type Node struct {
 	CidsInIndex   []string
 	VectorCache   map[int](Vector)
 	EmbsStaging   map[string]([]float32)
+	Leader peer.ID
 
 	// State         NodeState // Estado do nó
 	State State
 	// Lider Stuff
 	StagingAKCs map[int]int
 	API APIInterface
+	RequestQueue map[uuid.UUID]RequestQueueEntry
+
+
+	// Follower Stuff
+	ProcessedRequests []uuid.UUID
 }
 
 
@@ -386,19 +403,20 @@ func (nd *Node) Run() {
 
     for {
 
-		nd.State.StateMux.Lock()
+	nd.State.StateMux.Lock()
         state := nd.State.NdState
-		nd.State.StateMux.Unlock()
+	nd.State.StateMux.Unlock()
         
         switch state {
         case FOLLOWER:
-			nd.StagingAKCs = nil
-			followerRoutine(nd, ctx)
+		nd.StagingAKCs = nil
+		followerRoutine(nd, ctx)
         case CANDIDATE:
-			candidateRoutine(nd, ctx)
+		candidateRoutine(nd, ctx)
         case LEADER:
-			nd.StagingAKCs = make(map[int]int)
-			liderRoutine(nd, ctx)
+		nd.Leader = nd.IpfsCore.Identity
+		nd.StagingAKCs = make(map[int]int)
+		liderRoutine(nd, ctx)
         }
     }
 
@@ -517,6 +535,22 @@ func (nd *Node) getPubSubRandomPeer(ctx context.Context, topic string) (peer.ID,
 	if err != nil {
 		err = fmt.Errorf("Erro ao procurar peers do pubsub para o tópico %s: %v\n", topic, err)
 		return nd.IpfsCore.Identity, err
+	}
+
+	leaderIdx := -1
+
+	// Remover Lider https://stackoverflow.com/a/37335777
+	for i := 0; i<len(peers); i++ {
+
+		if(peers[i]== nd.Leader){
+			leaderIdx = i
+			break
+		}
+	}
+
+	if(leaderIdx > 0){
+		peers[leaderIdx] = peers[len(peers)-1]
+		peers = peers[:len(peers)-1]
 	}
 
 	idx := rand.Intn(len(peers))

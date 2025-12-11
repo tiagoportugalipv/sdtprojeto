@@ -79,14 +79,8 @@ type VoteMessage struct {
     Candidate peer.ID
 }
 
-type ResquestType int
+type ResquestType types.ResquestType
 
-
-const (
-    ADD ResquestType = 1
-    PROMPT ResquestType = 2
-    GET ResquestType = 3
-)
 
 type ClientRequest struct {
 
@@ -101,12 +95,9 @@ type ClientResponse struct {
     RequestUUID []byte
     Age int
     Success bool
-    
-
+    Response interface{}
 
 }
-
-// Raft timings
 
 
 
