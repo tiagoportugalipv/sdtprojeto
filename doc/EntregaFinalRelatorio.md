@@ -32,6 +32,8 @@ Todos os elementos do grupo interpretaram a implementação do projeto em `go` c
 
 - Disponibilizar API REST para interação com cliente
 
+## 
+
 ## Arquitetura da solução UML
 
 ### | Add File - Diagrama de sequência
@@ -68,7 +70,7 @@ Peer2-->>Lider: ClientResponse (GetFile)
 Lider-->>Cliente: FileBytes
 ```
 
-### |Prompt - Diagrama de sequência:
+### |Prompt - Diagrama de sequência
 
 ```mermaid
 sequenceDiagram
@@ -104,6 +106,8 @@ stateDiagram-v2
     Candidate --> Follower:heartbeat discovery
     Candidate--> Leader:vote majority
 ```
+
+## 
 
 ## Implementação
 
@@ -250,6 +254,8 @@ O sistema implementa três mecanismos de deteção de falhas do líder:​
 2. **Timeout nos followers**: Ausência de heartbeats por 15-30 segundos (com jitter) indica falha​
 
 3. **Eleição automática**: Quando timeout é atingido, o peer torna-se candidato, solicita votos, e com maioria torna-se novo líder​
+
+## 
 
 ## Conclusão
 
