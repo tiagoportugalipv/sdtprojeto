@@ -84,19 +84,13 @@ sequenceDiagram
 ### |Transição de rotinas - Diagrama de estados
 
 ```mermaid
-
-
-
 stateDiagram-v2
     direction LR
-    
+
     [*]-->Follower
     Follower --> Candidate:heartbeat timeout
     Candidate --> Follower:heartbeat discovery
     Candidate--> Leader:vote majority
-   
-
-
 ```
 
 ## Implementação
@@ -107,7 +101,7 @@ stateDiagram-v2
 
 ```go
  AEM Topico = "aem" // Topico AppendEntryMessage 
- 
+
  type AppendEntryMessage struct {
     Vector Vector 
     Embeddings []float32 
@@ -153,14 +147,70 @@ type HeartBeatMessage struct {
 
 ```go
  RBLQ Topico = "rebuildquery" // Topico RebuildQuery
- 
+
  type RebuildQueryMessage struct {
     Info []string 
     Dest peer.ID
 }
 ```
 
+**RebuildResponse**
 
+```go
+    RBLR Topico = "rebuildreponse" // Topico RebuildResponse
+    
+    type RebuildResponseMessage struct {
+    Response map[string][]float32
+    Dest peer.ID
+}
+```
+
+**Candidate Proposal**
+
+```go
+CDTP Topico = "candidateproposal" // Topico CandidatePorposal
+
+
+type CandidatePorposalMessage struct {
+    Term int
+}
+```
+
+**Votting poll**
+
+```go
+    VTP  Topico = "votingpool" // Topico VotingPool
+    
+    type VoteMessage struct {
+    Term int
+    Candidate peer.ID
+}
+
+```
+
+**ClientRequest**
+
+```go
+    CRQ  Topico = "clientrequest" // Topico ClientResquest
+    
+    type ClientRequest struct {
+
+    RequestUUID []byte
+    Type ResquestType
+    Age int
+    Arg string
+    Dest peer.ID
+
+}
+```
+
+**ClientResponse**
+
+```go
+    CRP  Topico = "clientresponse" // Topico ClientResponse
+    
+    
+```
 
 ## Conclusão
 
